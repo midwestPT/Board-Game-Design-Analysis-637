@@ -1,4 +1,6 @@
 // Enhanced demo service with complete game functionality
+import { PHYSIOTACTICS_CARD_DATABASE } from '../data/expandedCardDatabase.js'
+
 export class DemoService {
   constructor() {
     this.isDemo = true
@@ -218,207 +220,53 @@ export class DemoService {
   }
 
   generatePTCards(caseId) {
-    const baseCards = [
-      {
-        id: 'pt_history_1',
-        name: 'History Taking',
-        type: 'history_taking',
-        energy_cost: 1,
-        rarity: 'common',
-        card_text: 'Ask about onset, duration, and aggravating factors. Gain 1 clue.',
-        flavor_text: 'A thorough history is the foundation of diagnosis.',
-        clues_revealed: 1,
-        assessment_category: 'history'
-      },
-      {
-        id: 'pt_observation_1',
-        name: 'Visual Observation',
-        type: 'assessment',
-        energy_cost: 1,
-        rarity: 'common',
-        card_text: 'Observe posture, gait, and visible signs. Gain 1 clue.',
-        flavor_text: 'Sometimes the most important information is what you can see.',
-        clues_revealed: 1,
-        assessment_category: 'observation'
-      },
-      {
-        id: 'pt_palpation_1',
-        name: 'Palpation Assessment',
-        type: 'assessment',
-        energy_cost: 2,
-        rarity: 'common',
-        card_text: 'Palpate for tenderness, swelling, and temperature. Gain 1-2 clues.',
-        flavor_text: 'Skilled hands can detect what eyes cannot see.',
-        clues_revealed: 2,
-        assessment_category: 'physical_exam'
-      },
-      {
-        id: 'pt_empathy_1',
-        name: 'Show Empathy',
-        type: 'communication',
-        energy_cost: 0,
-        rarity: 'common',
-        card_text: 'Demonstrate understanding and validation. +1 Rapport.',
-        flavor_text: 'Empathy is the cornerstone of therapeutic relationships.',
-        rapport_change: 1,
-        counters_emotional: true
-      },
-      {
-        id: 'pt_explanation_1',
-        name: 'Clear Explanation',
-        type: 'communication',
-        energy_cost: 1,
-        rarity: 'common',
-        card_text: 'Explain procedures and findings clearly. +1 Rapport, reduces patient anxiety.',
-        flavor_text: 'Knowledge shared is fear reduced.',
-        rapport_change: 1
-      }
-    ]
-
+    // Get general PT cards from enhanced database
+    const baseCards = [...PHYSIOTACTICS_CARD_DATABASE.pt_student_cards]
+    
     // Add case-specific cards
     const caseSpecificCards = this.getCaseSpecificPTCards(caseId)
     
-    return [...baseCards, ...caseSpecificCards].slice(0, 5)
+    // Mix in some advanced cards for variety
+    const advancedCards = [...PHYSIOTACTICS_CARD_DATABASE.advanced_pt_cards].slice(0, 2)
+    
+    // Combine and return 5 cards
+    const allCards = [...baseCards, ...caseSpecificCards, ...advancedCards]
+    return this.shuffleArray(allCards).slice(0, 5)
   }
 
   getCaseSpecificPTCards(caseId) {
-    const caseCards = {
-      ankle_sprain: [
-        {
-          id: 'pt_ottawa_rules',
-          name: 'Ottawa Ankle Rules',
-          type: 'assessment',
-          energy_cost: 2,
-          rarity: 'uncommon',
-          card_text: 'Apply evidence-based decision rules. High accuracy clue about fracture risk.',
-          flavor_text: 'Evidence-based practice guides clinical decisions.',
-          clues_revealed: 1,
-          assessment_category: 'special_test',
-          confidence_boost: 20
-        },
-        {
-          id: 'pt_stress_test',
-          name: 'Ligament Stress Test',
-          type: 'assessment',
-          energy_cost: 3,
-          rarity: 'uncommon',
-          card_text: 'Test ligament integrity. May cause discomfort.',
-          flavor_text: 'Careful testing reveals the extent of injury.',
-          clues_revealed: 2,
-          assessment_category: 'special_test'
-        }
-      ],
-      low_back_pain: [
-        {
-          id: 'pt_red_flags',
-          name: 'Red Flag Screening',
-          type: 'assessment',
-          energy_cost: 2,
-          rarity: 'uncommon',
-          card_text: 'Screen for serious pathology. Critical safety assessment.',
-          flavor_text: 'Some things cannot be missed.',
-          clues_revealed: 1,
-          assessment_category: 'safety',
-          confidence_boost: 25
-        }
-      ]
-    }
-
-    return caseCards[caseId] || []
+    const caseData = PHYSIOTACTICS_CARD_DATABASE.case_specific_cards[caseId]
+    return caseData ? [...caseData.pt_cards] : []
   }
 
   generatePatientCards(caseId) {
-    const baseCards = [
-      {
-        id: 'patient_minimize_1',
-        name: 'Minimize Symptoms',
-        type: 'deflection',
-        deflection_cost: 1,
-        rarity: 'common',
-        card_text: 'Downplay pain and dysfunction. "It\'s not that bad, really."',
-        flavor_text: 'Many patients minimize symptoms to avoid appearing weak.',
-        information_reduction: 0.5
-      },
-      {
-        id: 'patient_anxiety_1',
-        name: 'Test Anxiety',
-        type: 'emotional_state',
-        emotional_cost: 2,
-        rarity: 'common',
-        card_text: 'Feel anxious about examination. PT must use communication or lose rapport.',
-        flavor_text: 'Being examined can trigger vulnerability and fear.',
-        emotion_type: 'anxiety',
-        requires_response: 'communication'
-      },
-      {
-        id: 'patient_cooperate_1',
-        name: 'Full Cooperation',
-        type: 'cooperation',
-        energy_cost: 1,
-        rarity: 'common',
-        card_text: 'Provide complete and honest responses. PT gains bonus clue.',
-        flavor_text: 'When trust is established, patients open up.',
-        cooperation_bonus: true
-      },
-      {
-        id: 'patient_previous_exp_1',
-        name: 'Previous Bad Experience',
-        type: 'deflection',
-        deflection_cost: 2,
-        rarity: 'uncommon',
-        card_text: 'Counter assessment card. "Last time they did that, it made things worse."',
-        flavor_text: 'Past negative experiences create lasting hesitation.',
-        counters: ['assessment']
-      },
-      {
-        id: 'patient_pain_focus_1',
-        name: 'Pain-Focused Response',
-        type: 'emotional_state',
-        emotional_cost: 1,
-        rarity: 'common',
-        card_text: 'Emphasize pain above all else. May miss other important symptoms.',
-        flavor_text: 'When pain dominates, other symptoms fade into background.',
-        emotion_type: 'pain_focus',
-        information_reduction: 0.3
-      }
-    ]
-
-    // Add case-specific patient cards
+    // Get general patient cards from enhanced database
+    const baseCards = [...PHYSIOTACTICS_CARD_DATABASE.patient_cards]
+    
+    // Add case-specific cards
     const caseSpecificCards = this.getCaseSpecificPatientCards(caseId)
     
-    return [...baseCards, ...caseSpecificCards].slice(0, 5)
+    // Mix in some advanced cards for variety
+    const advancedCards = [...PHYSIOTACTICS_CARD_DATABASE.advanced_patient_cards].slice(0, 2)
+    
+    // Combine and return 5 cards
+    const allCards = [...baseCards, ...caseSpecificCards, ...advancedCards]
+    return this.shuffleArray(allCards).slice(0, 5)
   }
 
   getCaseSpecificPatientCards(caseId) {
-    const caseCards = {
-      ankle_sprain: [
-        {
-          id: 'patient_athlete_impatience',
-          name: 'Athletic Impatience',
-          type: 'emotional_state',
-          emotional_cost: 2,
-          rarity: 'uncommon',
-          card_text: 'Focus only on return-to-play timeline. "When can I get back out there?"',
-          flavor_text: 'Athletes often prioritize performance over proper healing.',
-          emotion_type: 'impatience'
-        }
-      ],
-      low_back_pain: [
-        {
-          id: 'patient_chronic_frustration',
-          name: 'Chronic Frustration',
-          type: 'emotional_state',
-          emotional_cost: 2,
-          rarity: 'uncommon',
-          card_text: 'Express frustration with ongoing pain. "Nothing seems to help."',
-          flavor_text: 'Chronic conditions test both body and spirit.',
-          emotion_type: 'frustration',
-          rapport_change: -1
-        }
-      ]
-    }
+    const caseData = PHYSIOTACTICS_CARD_DATABASE.case_specific_cards[caseId]
+    return caseData ? [...caseData.patient_cards] : []
+  }
 
-    return caseCards[caseId] || []
+  // Utility method for shuffling arrays
+  shuffleArray(array) {
+    const shuffled = [...array]
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    }
+    return shuffled
   }
 
   // Mock analytics

@@ -3,6 +3,7 @@ import {supabase} from '../lib/supabase'
 import {demoService} from '../services/demoService'
 import {gameEngine} from '../engine/GameEngine'
 import {aiOpponent} from '../services/aiOpponentService'
+import {applyModifierEffects, updateTemporaryModifiers} from '../data/gameModifiers'
 
 const useGameStore = create((set, get) => ({
   gameState: null,
@@ -14,13 +15,23 @@ const useGameStore = create((set, get) => ({
   victoryStatus: null,
   aiThinking: false,
   playerRole: 'pt_student',
+  activeModifiers: [],
 
   initializeGame: async (config) => {
     set({ loading: true, error: null })
     
     try {
       // Create game
-      const game = await demoService.createGame(config)
+      let game = await demoService.createGame(config)
+      
+      // Apply modifiers if provided
+      if (config.modifiers && config.modifiers.length > 0) {
+        game.game_state = applyModifierEffects(game.game_state, config.modifiers)
+        game.game_state.activeModifiers = config.modifiers.map(modifier => ({
+          ...modifier,
+          remainingDuration: modifier.effect.duration === 'permanent' ? 'permanent' : modifier.effect.duration
+        }))
+      }
       
       // Set the human player's role
       const humanPlayerRole = config.playerRole === 'pt' ? 'pt_student' : 'patient'
@@ -40,11 +51,13 @@ const useGameStore = create((set, get) => ({
         playerRole: humanPlayerRole,
         predictions: predictions,
         loading: false,
-        error: null
+        error: null,
+        activeModifiers: game.game_state.activeModifiers || []
       })
 
       console.log('Game initialized successfully:', game.id)
       console.log('Human player role:', humanPlayerRole)
+      console.log('Active modifiers:', game.game_state.activeModifiers)
       return game
     } catch (error) {
       console.error('Error initializing game:', error)
@@ -143,12 +156,16 @@ const useGameStore = create((set, get) => ({
         )
 
         if (result.success) {
-          // Add AI reasoning to game log
+          // Add AI card play to game log with better formatting
+          const playerName = aiPlayerRole === 'pt_student' ? 'Therapist' : 'Patient'
           result.gameState.gameLog.push({
             timestamp: Date.now(),
-            action: 'ai_card_played',
+            action: 'card_played',
             player: aiPlayerRole,
-            message: aiResponse.reasoning,
+            cardPlayed: aiResponse.cardId,
+            cardName: result.gameState.playerHands[aiPlayerRole]?.find(c => c.id === aiResponse.cardId)?.name || 'Unknown Card',
+            message: `${playerName} played ${result.gameState.playerHands[aiPlayerRole]?.find(c => c.id === aiResponse.cardId)?.name || 'a card'}.`,
+            aiReasoning: aiResponse.reasoning,
             personality_context: aiResponse.personality_context
           })
 
@@ -232,16 +249,23 @@ const useGameStore = create((set, get) => ({
       // Determine next player (opposite role)
       const nextPlayer = playerRole === 'pt_student' ? 'patient' : 'pt_student'
 
+      // Update temporary modifiers
+      newGameState = updateTemporaryModifiers(newGameState)
+      
       // If returning to human player, increment turn
       if (nextPlayer === playerRole) {
         newGameState.turnNumber += 1
-        // Regenerate energy for human player
-        if (playerRole === 'pt_student') {
-          newGameState.ptResources.energy = Math.min(12, newGameState.ptResources.energy + 3)
-        } else {
-          newGameState.patientResources.energy = Math.min(12, newGameState.patientResources.energy + 3)
-        }
         console.log(`Starting turn ${newGameState.turnNumber}`)
+      }
+
+      // Regenerate energy for the next player at start of their turn (with modifiers)
+      if (nextPlayer === 'pt_student') {
+        const baseRegen = 3
+        const modifierRegen = newGameState.modifiers?.energyRegeneration || 0
+        const totalRegen = Math.max(1, baseRegen + modifierRegen) // Minimum 1 energy per turn
+        newGameState.ptResources.energy = Math.min(12, newGameState.ptResources.energy + totalRegen)
+      } else {
+        newGameState.patientResources.energy = Math.min(12, newGameState.patientResources.energy + 3)
       }
 
       // Clear cards played this turn
@@ -259,12 +283,15 @@ const useGameStore = create((set, get) => ({
 
       newGameState.currentPlayer = nextPlayer
 
-      // Add turn change to log
+      // Add turn change to log with better formatting
+      const currentPlayerName = currentPlayer === 'pt_student' ? 'Therapist' : 'Patient'
+      const nextPlayerName = nextPlayer === 'pt_student' ? 'Therapist' : 'Patient'
+      
       newGameState.gameLog.push({
         timestamp: Date.now(),
         action: 'turn_ended',
         player: currentPlayer,
-        message: `${currentPlayer} ended their turn. ${nextPlayer}'s turn begins.`
+        message: `${currentPlayerName} ended their turn. ${nextPlayerName}'s turn begins.`
       })
 
       // Generate new predictions
@@ -277,7 +304,8 @@ const useGameStore = create((set, get) => ({
         gameState: newGameState,
         currentPlayer: nextPlayer,
         predictions: predictions,
-        victoryStatus: victoryUpdate
+        victoryStatus: victoryUpdate,
+        activeModifiers: newGameState.activeModifiers || []
       })
 
       // Check for game end
@@ -297,9 +325,9 @@ const useGameStore = create((set, get) => ({
   },
 
   drawCard: (playerType, caseId) => {
-    // Generate a new card for the player
-    const cardPool = playerType === 'pt_student' 
-      ? demoService.generatePTCards(caseId) 
+    // Generate a new card for the player using enhanced card database
+    const cardPool = playerType === 'pt_student'
+      ? demoService.generatePTCards(caseId)
       : demoService.generatePatientCards(caseId)
 
     if (cardPool.length === 0) return null
@@ -396,7 +424,8 @@ const useGameStore = create((set, get) => ({
       predictions: null,
       victoryStatus: null,
       aiThinking: false,
-      playerRole: 'pt_student'
+      playerRole: 'pt_student',
+      activeModifiers: []
     })
   }
 }))

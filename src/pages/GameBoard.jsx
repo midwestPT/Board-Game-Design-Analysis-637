@@ -5,11 +5,16 @@ import SafeIcon from '../common/SafeIcon'
 import GameCard from '../components/GameCard'
 import PlayerHand from '../components/PlayerHand'
 import GameStats from '../components/GameStats'
+import Tutorial from '../components/Tutorial'
+import GameModifiers from '../components/GameModifiers'
+import ModifierSelector from '../components/ModifierSelector'
 import useGameStore from '../store/gameStore'
 
-const { FiHeart, FiBattery, FiClock, FiTarget, FiUser, FiActivity, FiAward, FiTrendingUp, FiCpu } = FiIcons
+const { FiHeart, FiBattery, FiClock, FiTarget, FiUser, FiActivity, FiAward, FiTrendingUp, FiCpu, FiHelpCircle, FiZap } = FiIcons
 
 function GameBoard() {
+  console.log('🎯 TUTORIAL & MODIFIER SYSTEM LOADED - VERSION 2.0')
+  
   const {
     gameState,
     currentPlayer,
@@ -25,13 +30,16 @@ function GameBoard() {
     loading,
     error,
     aiThinking,
-    resetGame
+    resetGame,
+    activeModifiers
   } = useGameStore()
 
   const [selectedCard, setSelectedCard] = useState(null)
   const [showPredictions, setShowPredictions] = useState(false)
   const [showVictoryProgress, setShowVictoryProgress] = useState(false)
   const [gameInitialized, setGameInitialized] = useState(false)
+  const [showTutorial, setShowTutorial] = useState(false)
+  const [showModifierSelector, setShowModifierSelector] = useState(false)
 
   useEffect(() => {
     // Initialize game from localStorage config
@@ -83,6 +91,16 @@ function GameBoard() {
     resetGame()
     setGameInitialized(false)
     setSelectedCard(null)
+  }
+
+  const handleModifiersSelected = (modifiers) => {
+    // Update game config with modifiers and restart game
+    const config = JSON.parse(localStorage.getItem('gameConfig') || '{"mode":"ai","difficulty":"beginner","case":"ankle_sprain","playerRole":"pt"}')
+    config.modifiers = modifiers
+    localStorage.setItem('gameConfig', JSON.stringify(config))
+    
+    // Restart game with new modifiers
+    handleNewGame()
   }
 
   // Check if it's the human player's turn
@@ -169,6 +187,15 @@ function GameBoard() {
             <div className="flex items-center space-x-4">
               <GameStats />
 
+              {/* Tutorial Button */}
+              <button
+                onClick={() => setShowTutorial(true)}
+                className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors"
+                title="Tutorial"
+              >
+                <SafeIcon icon={FiHelpCircle} />
+              </button>
+
               {/* AI Suggestions Button */}
               <button
                 onClick={() => setShowPredictions(!showPredictions)}
@@ -185,6 +212,15 @@ function GameBoard() {
                 title="Victory Progress"
               >
                 <SafeIcon icon={FiAward} />
+              </button>
+
+              {/* Modifier Selector Button */}
+              <button
+                onClick={() => setShowModifierSelector(true)}
+                className="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition-colors"
+                title="Challenge Modifiers"
+              >
+                <SafeIcon icon={FiZap} />
               </button>
 
               <button
@@ -265,6 +301,18 @@ function GameBoard() {
           </AnimatePresence>
         </motion.div>
 
+        {/* Active Modifiers Display */}
+        {activeModifiers && activeModifiers.length > 0 && (
+          <motion.div
+            className="bg-white rounded-2xl shadow-lg p-6 mb-6"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+          >
+            <GameModifiers modifiers={activeModifiers} compact={false} />
+          </motion.div>
+        )}
+
         {/* Learning Moments Display */}
         {learningMoments.length > 0 && (
           <motion.div
@@ -290,11 +338,19 @@ function GameBoard() {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.6, delay: 0.2 }}
           >
-            <div className="flex items-center mb-6">
-              <SafeIcon icon={currentPlayer === 'patient' ? FiCpu : FiUser} className="text-2xl text-orange-500 mr-3" />
-              <h2 className="text-2xl font-bold text-gray-900">
-                {gameState.game_mode === 'ai' ? 'AI Patient' : 'Patient'}
-              </h2>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center">
+                <SafeIcon icon={currentPlayer === 'patient' ? FiCpu : FiUser} className="text-2xl text-orange-500 mr-3" />
+                <h2 className="text-2xl font-bold text-gray-900">
+                  {gameState.game_mode === 'ai' ? 'AI Patient' : 'Patient'}
+                </h2>
+              </div>
+              <div className="flex items-center space-x-2">
+                <SafeIcon icon={FiActivity} className="text-orange-500" />
+                <span className="text-sm font-medium text-gray-600">
+                  Cards: {gameState.playerHands?.patient?.length || 0}
+                </span>
+              </div>
             </div>
 
             {/* Patient Resources */}
@@ -345,6 +401,14 @@ function GameBoard() {
                 ))
               )}
             </div>
+
+            {/* Patient Modifiers (if any) */}
+            {activeModifiers && activeModifiers.length > 0 && (
+              <div className="space-y-2 mt-4">
+                <h3 className="font-semibold text-gray-700">Challenges</h3>
+                <GameModifiers modifiers={activeModifiers} compact={true} />
+              </div>
+            )}
           </motion.div>
 
           {/* Center Play Area */}
@@ -393,10 +457,24 @@ function GameBoard() {
                 ) : (
                   gameState.gameLog.slice(-5).reverse().map((log, index) => (
                     <div key={index} className="text-sm mb-2 last:mb-0">
-                      <span className="font-medium text-gray-600">
-                        {log.player === 'system' ? '🎮' : log.player === 'patient' ? '🤖' : '👤'}
-                      </span>
-                      <span className="ml-2">{log.message || log.action}</span>
+                      <div className="flex items-start space-x-2">
+                        <span className="font-medium text-gray-600">
+                          {log.player === 'system' ? '🎮' : log.player === 'patient' ? '🤖' : '👤'}
+                        </span>
+                        <div className="flex-1">
+                          <span>{log.message || log.action}</span>
+                          {log.cardName && (
+                            <div className="mt-1 p-2 bg-white rounded border text-xs">
+                              <strong>Card Played:</strong> {log.cardName}
+                              {log.aiReasoning && (
+                                <div className="text-gray-600 mt-1">
+                                  <em>AI: {log.aiReasoning}</em>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   ))
                 )}
@@ -411,9 +489,17 @@ function GameBoard() {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.6, delay: 0.4 }}
           >
-            <div className="flex items-center mb-6">
-              <SafeIcon icon={FiTarget} className="text-2xl text-blue-500 mr-3" />
-              <h2 className="text-2xl font-bold text-gray-900">PT Student (You)</h2>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center">
+                <SafeIcon icon={FiTarget} className="text-2xl text-blue-500 mr-3" />
+                <h2 className="text-2xl font-bold text-gray-900">PT Student (You)</h2>
+              </div>
+              <div className="flex items-center space-x-2">
+                <SafeIcon icon={FiActivity} className="text-blue-500" />
+                <span className="text-sm font-medium text-gray-600">
+                  Cards: {gameState.playerHands?.pt_student?.length || 0}
+                </span>
+              </div>
             </div>
 
             {/* PT Resources */}
@@ -487,6 +573,22 @@ function GameBoard() {
             selectedCard={selectedCard}
           />
         </motion.div>
+
+        {/* Tutorial Overlay */}
+        {showTutorial && (
+          <Tutorial
+            gameState={gameState}
+            onClose={() => setShowTutorial(false)}
+          />
+        )}
+
+        {/* Modifier Selector Overlay */}
+        {showModifierSelector && (
+          <ModifierSelector
+            onModifiersSelected={handleModifiersSelected}
+            onClose={() => setShowModifierSelector(false)}
+          />
+        )}
       </div>
     </div>
   )

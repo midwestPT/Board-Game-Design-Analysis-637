@@ -134,16 +134,19 @@ class CardValidationEngine {
   }
 
   validateResourceCosts(gameState, card, player) {
-    const playerResources = player.id === 'pt_student' 
-      ? gameState.ptResources 
+    const playerResources = player.id === 'pt_student'
+      ? gameState.ptResources
       : gameState.patientResources
 
-    // Check energy cost
-    if (card.energy_cost && playerResources.energy < card.energy_cost) {
-      return { 
-        isValid: false, 
-        error: `Insufficient energy (need ${card.energy_cost}, have ${playerResources.energy})`, 
-        suggestions: ['End turn to regenerate energy', 'Use a lower cost card'] 
+    // Calculate actual card cost with modifiers
+    const actualEnergyCost = this.calculateModifiedCardCost(gameState, card, player.id)
+
+    // Check energy cost (with modifiers)
+    if (actualEnergyCost > 0 && playerResources.energy < actualEnergyCost) {
+      return {
+        isValid: false,
+        error: `Insufficient energy (need ${actualEnergyCost}, have ${playerResources.energy})`,
+        suggestions: ['End turn to regenerate energy', 'Use a lower cost card']
       }
     }
 
@@ -166,6 +169,53 @@ class CardValidationEngine {
     }
 
     return { isValid: true }
+  }
+
+  calculateModifiedCardCost(gameState, card, playerId) {
+    let cost = card.energy_cost || 0
+    const legacyModifiers = gameState.modifiers || {}
+    const activeModifiers = gameState.activeModifiers || []
+
+    // Apply legacy modifiers (for backward compatibility)
+    if (legacyModifiers.cardCostIncrease) {
+      cost += legacyModifiers.cardCostIncrease
+    }
+    if (card.type === 'treatment' && legacyModifiers.treatmentCostIncrease) {
+      cost += legacyModifiers.treatmentCostIncrease
+    }
+
+    // Apply new active modifiers
+    activeModifiers.forEach(modifier => {
+      if (modifier.effect.type === 'card_cost' && modifier.effect.target === 'all') {
+        cost += modifier.effect.modifier
+      }
+      if (modifier.effect.type === 'card_cost' && modifier.effect.target === card.type) {
+        cost += modifier.effect.modifier
+      }
+      if (modifier.effect.type === 'assessment_cost' && card.type === 'assessment') {
+        cost += modifier.effect.modifier
+      }
+    })
+
+    // Check treatment limits (legacy and new)
+    if (card.type === 'treatment') {
+      const legacyLimit = legacyModifiers.treatmentLimit
+      const activeLimit = activeModifiers.find(m => m.effect.type === 'treatment_limit')?.effect.modifier
+      const treatmentLimit = activeLimit || legacyLimit
+      
+      if (treatmentLimit) {
+        const treatmentCardsPlayed = gameState.gameLog?.filter(log =>
+          log.action === 'card_played' &&
+          (log.cardType === 'treatment' || log.effects?.some(e => e.type === 'assessment'))
+        ).length || 0
+        
+        if (treatmentCardsPlayed >= treatmentLimit) {
+          return Infinity // Cannot play more treatment cards
+        }
+      }
+    }
+
+    return Math.max(0, cost)
   }
 
   validateTargeting(gameState, card, player, targetId) {
@@ -243,14 +293,15 @@ class CardInteractionEngine {
   async calculatePrimaryEffects(card, gameState, player, targetId) {
     const effects = []
 
-    // Resource changes
-    if (card.energy_cost) {
+    // Resource changes with modifiers
+    const actualEnergyCost = this.calculateModifiedCardCost(gameState, card, player.id)
+    if (actualEnergyCost > 0) {
       effects.push({
         type: 'resource_change',
         target: player.id === 'pt_student' ? 'ptResources' : 'patientResources',
         property: 'energy',
-        change: -card.energy_cost,
-        description: `Spend ${card.energy_cost} energy`
+        change: -actualEnergyCost,
+        description: `Spend ${actualEnergyCost} energy${actualEnergyCost !== card.energy_cost ? ' (modified)' : ''}`
       })
     }
 
@@ -287,13 +338,30 @@ class CardInteractionEngine {
   async calculateAssessmentEffects(card, gameState) {
     const effects = []
 
-    // Reveal clues based on card power
-    const cluesRevealed = card.clues_revealed || 1
+    // Check for assessment failure chance from modifiers
+    const modifiers = gameState.modifiers || {}
+    const failureChance = modifiers.assessmentFailureChance || 0
+    
+    if (failureChance > 0 && Math.random() < failureChance) {
+      effects.push({
+        type: 'assessment_failed',
+        description: 'Assessment failed due to equipment malfunction',
+        failure_reason: 'equipment_malfunction'
+      })
+      return effects
+    }
+
+    // Reveal clues based on card power (with potential bonuses)
+    let cluesRevealed = card.clues_revealed || 1
+    if (modifiers.assessmentBonus) {
+      cluesRevealed += modifiers.assessmentBonus
+    }
+
     effects.push({
       type: 'reveal_clues',
       count: cluesRevealed,
       category: card.assessment_category || 'general',
-      description: `Reveal ${cluesRevealed} ${card.assessment_category || 'general'} finding(s)`
+      description: `Reveal ${cluesRevealed} ${card.assessment_category || 'general'} finding(s)${modifiers.assessmentBonus ? ' (bonus clue)' : ''}`
     })
 
     // Increase diagnostic confidence
@@ -519,13 +587,17 @@ class GameStateManager {
       await this.applyEffect(newGameState, effect)
     }
 
-    // Update game log
+    // Update game log with enhanced formatting
+    const playerName = playerId === 'pt_student' ? 'Therapist' : 'Patient'
     newGameState.gameLog = newGameState.gameLog || []
     newGameState.gameLog.push({
       timestamp: Date.now(),
       action: 'card_played',
       player: playerId,
-      card: card.name,
+      cardName: card.name,
+      cardText: card.card_text,
+      flavorText: card.flavor_text,
+      message: `${playerName} played ${card.name}.`,
       effects: interactions.primaryEffects,
       educational_impact: interactions.educationalImpact
     })
@@ -533,6 +605,14 @@ class GameStateManager {
     // Update turn state
     newGameState.cardsPlayedThisTurn = newGameState.cardsPlayedThisTurn || []
     newGameState.cardsPlayedThisTurn.push(card.id)
+
+    // Add card combo checking
+    newGameState.lastCardPlayed = {
+      id: card.id,
+      type: card.type,
+      playerId: playerId,
+      turnPlayed: newGameState.turnNumber
+    }
 
     return newGameState
   }
@@ -554,13 +634,34 @@ class GameStateManager {
       case 'add_complexity':
         this.addComplexity(gameState, effect)
         break
+      case 'assessment_failed':
+        this.handleAssessmentFailure(gameState, effect)
+        break
     }
+  }
+
+  handleAssessmentFailure(gameState, effect) {
+    // Add failure to game log
+    gameState.gameLog = gameState.gameLog || []
+    gameState.gameLog.push({
+      timestamp: Date.now(),
+      action: 'assessment_failed',
+      player: 'system',
+      message: `Assessment failed: ${effect.description}`,
+      failure_reason: effect.failure_reason
+    })
   }
 
   applyResourceChange(gameState, effect) {
     const target = gameState[effect.target]
     if (target && target[effect.property] !== undefined) {
-      target[effect.property] = Math.max(0, target[effect.property] + effect.change)
+      // Apply modifier effects for cooperation bonus
+      let change = effect.change
+      if (effect.property === 'cooperation' && gameState.modifiers?.cooperationBonus) {
+        change += gameState.modifiers.cooperationBonus
+      }
+      
+      target[effect.property] = Math.max(0, target[effect.property] + change)
     }
   }
 
