@@ -13,7 +13,7 @@ const useGameStore = create((set, get) => ({
   predictions: null,
   victoryStatus: null,
   aiThinking: false,
-  playerRole: 'pt_student', // Add this to track the human player's role
+  playerRole: 'pt_student',
 
   initializeGame: async (config) => {
     set({ loading: true, error: null })
@@ -37,7 +37,7 @@ const useGameStore = create((set, get) => ({
         gameState: game.game_state,
         gameId: game.id,
         currentPlayer: game.game_state.currentPlayer,
-        playerRole: humanPlayerRole, // Store human player role
+        playerRole: humanPlayerRole,
         predictions: predictions,
         loading: false,
         error: null
@@ -129,8 +129,9 @@ const useGameStore = create((set, get) => ({
 
       // Get AI response
       const aiResponse = await aiOpponent.generateAIResponse(gameState, null)
+      console.log('AI response:', aiResponse)
 
-      if (aiResponse.action === 'play_card') {
+      if (aiResponse.action === 'play_card' && aiResponse.cardId) {
         console.log('AI playing card:', aiResponse.cardId, aiResponse.reasoning)
 
         // Process AI card play
@@ -165,15 +166,49 @@ const useGameStore = create((set, get) => ({
           console.log('AI turn completed successfully')
         } else {
           console.error('AI card play failed:', result.error)
-          set({ aiThinking: false })
+          // Force end AI turn if card play fails
+          await get().forceEndAITurn()
         }
       } else {
         console.log('AI chose not to play a card:', aiResponse.message)
-        // AI passes, switch back to human player
-        await get().endTurn()
+        // AI passes, force end turn
+        await get().forceEndAITurn()
       }
     } catch (error) {
       console.error('Error during AI turn:', error)
+      // Force end AI turn on error
+      await get().forceEndAITurn()
+    }
+  },
+
+  forceEndAITurn: async () => {
+    const state = get()
+    const { gameState, playerRole } = state
+
+    try {
+      console.log('Force ending AI turn')
+      const newGameState = { ...gameState }
+      
+      // Switch back to human player
+      newGameState.currentPlayer = playerRole
+      
+      // Add log entry
+      newGameState.gameLog.push({
+        timestamp: Date.now(),
+        action: 'ai_turn_ended',
+        player: 'system',
+        message: 'AI turn ended, returning to player'
+      })
+
+      set({
+        gameState: newGameState,
+        currentPlayer: playerRole,
+        aiThinking: false
+      })
+
+      console.log('AI turn force ended, back to player')
+    } catch (error) {
+      console.error('Error force ending AI turn:', error)
       set({ aiThinking: false, error: error.message })
     }
   },
