@@ -297,9 +297,9 @@ const useGameStore = create((set, get) => ({
   },
 
   drawCard: (playerType, caseId) => {
-    // Generate a new card for the player
-    const cardPool = playerType === 'pt_student' 
-      ? demoService.generatePTCards(caseId) 
+    // Generate a new card for the player using enhanced card database
+    const cardPool = playerType === 'pt_student'
+      ? demoService.generatePTCards(caseId)
       : demoService.generatePatientCards(caseId)
 
     if (cardPool.length === 0) return null
