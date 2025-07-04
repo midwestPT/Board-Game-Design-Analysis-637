@@ -1,10 +1,11 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import * as FiIcons from 'react-icons/fi';
-import SafeIcon from '../common/SafeIcon';
+import React from 'react'
+import { Link } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import * as FiIcons from 'react-icons/fi'
+import SafeIcon from '../common/SafeIcon'
+import DemoModeIndicator from '../components/DemoModeIndicator'
 
-const { FiPlay, FiUsers, FiTarget, FiTrendingUp, FiBookOpen, FiAward } = FiIcons;
+const { FiPlay, FiUsers, FiTarget, FiTrendingUp, FiBookOpen, FiAward } = FiIcons
 
 function LandingPage() {
   const features = [
@@ -28,10 +29,14 @@ function LandingPage() {
       title: 'Evidence-Based',
       description: 'All scenarios based on current research and real clinical cases'
     }
-  ];
+  ]
 
   return (
     <div className="min-h-screen">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+        <DemoModeIndicator />
+      </div>
+
       {/* Hero Section */}
       <div className="relative overflow-hidden bg-gradient-to-br from-blue-600 via-purple-600 to-indigo-800">
         <div className="absolute inset-0 bg-black opacity-20"></div>
@@ -223,7 +228,7 @@ function LandingPage() {
         </div>
       </div>
     </div>
-  );
+  )
 }
 
-export default LandingPage;
+export default LandingPage

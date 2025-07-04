@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { gameService } from '../services/gameService'
-import { analyticsService } from '../services/analyticsService'
+import { supabase } from '../lib/supabase'
+import { demoService } from '../services/demoService'
 
 const useGameStore = create((set, get) => ({
   gameState: null,
@@ -8,19 +8,29 @@ const useGameStore = create((set, get) => ({
   gameId: null,
   loading: false,
   error: null,
+  isDemoMode: !supabase,
 
   initializeGame: async (config) => {
     set({ loading: true, error: null })
     
     try {
-      const game = await gameService.createGame(config)
+      let game
+      
+      if (!supabase) {
+        // Demo mode
+        game = await demoService.createGame(config)
+      } else {
+        // Real Supabase game creation would go here
+        game = await demoService.createGame(config) // Fallback to demo for now
+      }
+
       set({
         gameState: game.game_state,
         gameId: game.id,
         currentPlayer: game.game_state.currentPlayer,
         loading: false
       })
-      
+
       return game
     } catch (error) {
       set({ error: error.message, loading: false })
@@ -32,14 +42,21 @@ const useGameStore = create((set, get) => ({
     set({ loading: true, error: null })
     
     try {
-      const game = await gameService.getGame(gameId)
+      // For demo, we'll just reinitialize a game
+      const game = await demoService.createGame({
+        mode: 'ai',
+        difficulty: 'beginner',
+        case: 'ankle_sprain',
+        playerRole: 'pt'
+      })
+
       set({
         gameState: game.game_state,
         gameId: game.id,
         currentPlayer: game.game_state.currentPlayer,
         loading: false
       })
-      
+
       return game
     } catch (error) {
       set({ error: error.message, loading: false })
@@ -49,9 +66,9 @@ const useGameStore = create((set, get) => ({
 
   playCard: async (cardId) => {
     const state = get()
-    const { gameState, currentPlayer, gameId } = state
+    const { gameState, currentPlayer } = state
     
-    if (!gameState || !gameId) return
+    if (!gameState) return
 
     try {
       const playerHand = gameState.playerHands[currentPlayer]
@@ -74,22 +91,21 @@ const useGameStore = create((set, get) => ({
         })
         newGameState.ptResources.energy -= card.energy_cost || 1
       }
-      
+
+      if (card.type === 'deflection') {
+        newGameState.patientResources.deflection -= card.deflection_cost || 1
+      }
+
+      if (card.type === 'communication') {
+        newGameState.ptResources.rapport += 1
+      }
+
       // Add to game log
       newGameState.gameLog.push({
         player: currentPlayer,
         action: `Played ${card.name}`,
         timestamp: Date.now()
       })
-
-      // Save action to database
-      await gameService.saveGameAction(gameId, {
-        type: 'play_card',
-        data: { cardId, cardName: card.name, player: currentPlayer }
-      })
-
-      // Update game state in database
-      await gameService.updateGameState(gameId, newGameState)
 
       set({ gameState: newGameState })
     } catch (error) {
@@ -100,9 +116,9 @@ const useGameStore = create((set, get) => ({
 
   endTurn: async () => {
     const state = get()
-    const { gameState, currentPlayer, gameId } = state
+    const { gameState, currentPlayer } = state
     
-    if (!gameState || !gameId) return
+    if (!gameState) return
 
     try {
       const newGameState = { ...gameState }
@@ -116,26 +132,18 @@ const useGameStore = create((set, get) => ({
         // Regenerate energy
         newGameState.ptResources.energy = Math.min(12, newGameState.ptResources.energy + 2)
       }
-      
+
       // Draw card if hand size below 5
       const currentHand = newGameState.playerHands[nextPlayer]
       if (currentHand.length < 5) {
-        const newCard = gameService.generateRandomCard?.(nextPlayer)
+        const newCard = demoService.generateStartingHand(nextPlayer)[0] // Get a random card
         if (newCard) {
+          newCard.id = `${newCard.id}_${Date.now()}` // Make unique
           newGameState.playerHands[nextPlayer].push(newCard)
         }
       }
 
       newGameState.currentPlayer = nextPlayer
-
-      // Save action to database
-      await gameService.saveGameAction(gameId, {
-        type: 'end_turn',
-        data: { previousPlayer: currentPlayer, nextPlayer }
-      })
-
-      // Update game state in database
-      await gameService.updateGameState(gameId, newGameState)
 
       set({
         gameState: newGameState,
@@ -154,7 +162,13 @@ const useGameStore = create((set, get) => ({
     if (!gameId) return
 
     try {
-      await analyticsService.saveGamePerformance(gameId, performanceData.userId, performanceData)
+      if (!supabase) {
+        // Demo mode
+        await demoService.saveGamePerformance(gameId, performanceData.userId, performanceData)
+      } else {
+        // Real Supabase save would go here
+        await demoService.saveGamePerformance(gameId, performanceData.userId, performanceData)
+      }
     } catch (error) {
       console.error('Error saving game performance:', error)
     }

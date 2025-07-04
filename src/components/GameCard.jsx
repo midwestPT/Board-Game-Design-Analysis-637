@@ -1,9 +1,9 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import * as FiIcons from 'react-icons/fi';
-import SafeIcon from '../common/SafeIcon';
+import React from 'react'
+import { motion } from 'framer-motion'
+import * as FiIcons from 'react-icons/fi'
+import SafeIcon from '../common/SafeIcon'
 
-const { FiZap, FiHeart, FiShield, FiTarget } = FiIcons;
+const { FiZap, FiHeart, FiShield, FiTarget } = FiIcons
 
 function GameCard({ card, isSelected = false, onClick, disabled = false }) {
   const getCardTypeColor = (type) => {
@@ -16,9 +16,9 @@ function GameCard({ card, isSelected = false, onClick, disabled = false }) {
       emotional_state: 'from-pink-500 to-pink-600',
       complexity: 'from-orange-500 to-orange-600',
       communication_barrier: 'from-gray-500 to-gray-600'
-    };
-    return colors[type] || 'from-gray-400 to-gray-500';
-  };
+    }
+    return colors[type] || 'from-gray-400 to-gray-500'
+  }
 
   const getCardIcon = (type) => {
     const icons = {
@@ -30,9 +30,9 @@ function GameCard({ card, isSelected = false, onClick, disabled = false }) {
       emotional_state: FiHeart,
       complexity: FiTarget,
       communication_barrier: FiZap
-    };
-    return icons[type] || FiTarget;
-  };
+    }
+    return icons[type] || FiTarget
+  }
 
   const getRarityColor = (rarity) => {
     const colors = {
@@ -41,15 +41,32 @@ function GameCard({ card, isSelected = false, onClick, disabled = false }) {
       rare: 'border-blue-400',
       epic: 'border-purple-400',
       legendary: 'border-yellow-400'
-    };
-    return colors[rarity] || 'border-gray-300';
-  };
+    }
+    return colors[rarity] || 'border-gray-300'
+  }
+
+  const getRarityBg = (rarity) => {
+    const colors = {
+      common: 'bg-gray-100 text-gray-700',
+      uncommon: 'bg-green-100 text-green-700',
+      rare: 'bg-blue-100 text-blue-700',
+      epic: 'bg-purple-100 text-purple-700',
+      legendary: 'bg-yellow-100 text-yellow-700'
+    }
+    return colors[rarity] || 'bg-gray-100 text-gray-700'
+  }
 
   return (
     <motion.div
       className={`relative bg-white rounded-xl shadow-lg border-2 transition-all cursor-pointer ${
-        isSelected ? 'border-blue-500 shadow-xl scale-105' : getRarityColor(card.rarity)
-      } ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-xl hover:scale-105'}`}
+        isSelected 
+          ? 'border-blue-500 shadow-xl scale-105' 
+          : getRarityColor(card.rarity)
+      } ${
+        disabled 
+          ? 'opacity-50 cursor-not-allowed' 
+          : 'hover:shadow-xl hover:scale-105'
+      }`}
       onClick={disabled ? undefined : onClick}
       whileHover={disabled ? {} : { y: -5 }}
       whileTap={disabled ? {} : { scale: 0.95 }}
@@ -83,13 +100,14 @@ function GameCard({ card, isSelected = false, onClick, disabled = false }) {
                 {card.deflection_cost}
               </div>
             )}
+            {card.emotional_cost && (
+              <div className="flex items-center bg-pink-100 text-pink-700 px-2 py-1 rounded-full text-xs">
+                <SafeIcon icon={FiHeart} className="mr-1" />
+                {card.emotional_cost}
+              </div>
+            )}
           </div>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-            card.rarity === 'common' ? 'bg-gray-100 text-gray-700' :
-            card.rarity === 'uncommon' ? 'bg-green-100 text-green-700' :
-            card.rarity === 'rare' ? 'bg-blue-100 text-blue-700' :
-            'bg-purple-100 text-purple-700'
-          }`}>
+          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getRarityBg(card.rarity)}`}>
             {card.rarity}
           </span>
         </div>
@@ -117,7 +135,7 @@ function GameCard({ card, isSelected = false, onClick, disabled = false }) {
         />
       )}
     </motion.div>
-  );
+  )
 }
 
-export default GameCard;
+export default GameCard

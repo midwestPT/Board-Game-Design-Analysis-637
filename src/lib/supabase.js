@@ -1,19 +1,39 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Project credentials will be auto-injected during deployment
-const SUPABASE_URL = 'https://your-project-id.supabase.co'
-const SUPABASE_ANON_KEY = 'your-anon-key'
+// These will be replaced with your actual Supabase credentials
+const SUPABASE_URL = 'YOUR_SUPABASE_URL'
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY'
 
-if(SUPABASE_URL === 'https://your-project-id.supabase.co' || SUPABASE_ANON_KEY === 'your-anon-key') {
-  throw new Error('Missing Supabase variables - Please connect your project first');
-}
+// For demo purposes, we'll use mock data if Supabase isn't connected
+const isDemoMode = SUPABASE_URL === 'YOUR_SUPABASE_URL'
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+export const supabase = isDemoMode ? null : createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false
   }
 })
+
+// Mock data for demo mode
+export const mockUser = {
+  id: 'demo-user-123',
+  email: 'demo@physiotactics.com',
+  user_metadata: {
+    full_name: 'Demo Student',
+    role: 'student',
+    institution_id: 'demo-university'
+  }
+}
+
+export const mockFacultyUser = {
+  id: 'demo-faculty-123',
+  email: 'faculty@physiotactics.com',
+  user_metadata: {
+    full_name: 'Dr. Demo Faculty',
+    role: 'faculty',
+    institution_id: 'demo-university'
+  }
+}
 
 export default supabase
