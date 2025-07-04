@@ -1,13 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 
-// These will be replaced with your actual Supabase credentials
-const SUPABASE_URL = 'YOUR_SUPABASE_URL'
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY'
+// Real Supabase credentials
+const SUPABASE_URL = 'https://hcukacnputasitezgphl.supabase.co'
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjdWthY25wdXRhc2l0ZXpncGhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE1OTIzMjYsImV4cCI6MjA2NzE2ODMyNn0.Klzx6VTJSJyZ25keu532Dij9NZZIuyH4N7gnNf9A2IM'
 
-// For demo purposes, we'll use mock data if Supabase isn't connected
-const isDemoMode = SUPABASE_URL === 'YOUR_SUPABASE_URL'
-
-export const supabase = isDemoMode ? null : createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
@@ -15,7 +12,7 @@ export const supabase = isDemoMode ? null : createClient(SUPABASE_URL, SUPABASE_
   }
 })
 
-// Mock data for demo mode
+// Mock data for demo mode when not authenticated
 export const mockUser = {
   id: 'demo-user-123',
   email: 'demo@physiotactics.com',

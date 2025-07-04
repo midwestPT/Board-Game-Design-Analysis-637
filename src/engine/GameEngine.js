@@ -10,27 +10,40 @@ export class GameEngine {
   // Core game flow management
   async processCardPlay(gameState, cardId, playerId, targetId = null) {
     try {
+      // Find the card being played
+      const player = gameState.players?.find(p => p.id === playerId) || { id: playerId, role: playerId }
+      const playerHand = gameState.playerHands[playerId] || []
+      const card = playerHand.find(c => c.id === cardId)
+
+      if (!card) {
+        return { success: false, error: 'Card not found in hand' }
+      }
+
       // 1. Validate the card play
       const validation = await this.validators.validateCardPlay(gameState, cardId, playerId, targetId)
       if (!validation.isValid) {
-        return { success: false, error: validation.error, suggestions: validation.suggestions }
+        return { 
+          success: false, 
+          error: validation.error, 
+          suggestions: validation.suggestions 
+        }
       }
 
       // 2. Calculate card interactions and effects
       const interactions = await this.interactionEngine.calculateInteractions(gameState, cardId, playerId, targetId)
-      
+
       // 3. Apply card effects to game state
-      const newGameState = await this.stateManager.applyCardEffects(gameState, interactions)
-      
+      const newGameState = await this.stateManager.applyCardEffects(gameState, interactions, card, playerId)
+
       // 4. Check for triggered effects and chains
       const chainedEffects = await this.interactionEngine.processChainedEffects(newGameState, interactions)
-      
+
       // 5. Apply any chained effects
       const finalGameState = await this.stateManager.applyChainedEffects(newGameState, chainedEffects)
-      
+
       // 6. Update victory conditions and scoring
       const victoryUpdate = await this.victorySystem.updateVictoryConditions(finalGameState, interactions)
-      
+
       // 7. Generate predictions for next turn
       const predictions = await this.predictionEngine.generatePredictions(finalGameState)
 
@@ -80,14 +93,10 @@ export class GameEngine {
 class CardValidationEngine {
   async validateCardPlay(gameState, cardId, playerId, targetId) {
     const card = this.findCard(gameState, cardId, playerId)
-    const player = gameState.players.find(p => p.id === playerId)
-    
+    const player = { id: playerId, role: playerId }
+
     if (!card) {
       return { isValid: false, error: 'Card not found', suggestions: ['Check your hand'] }
-    }
-
-    if (!player) {
-      return { isValid: false, error: 'Player not found', suggestions: [] }
     }
 
     // Check basic play conditions
@@ -112,28 +121,20 @@ class CardValidationEngine {
   validateBasicConditions(gameState, card, player) {
     // Check if it's player's turn
     if (gameState.currentPlayer !== player.id) {
-      return { 
-        isValid: false, 
-        error: 'Not your turn', 
-        suggestions: ['Wait for your turn'] 
-      }
+      return { isValid: false, error: 'Not your turn', suggestions: ['Wait for your turn'] }
     }
 
     // Check if card is in player's hand
-    const playerHand = gameState.playerHands[player.role] || []
+    const playerHand = gameState.playerHands[player.id] || []
     if (!playerHand.find(c => c.id === card.id)) {
-      return { 
-        isValid: false, 
-        error: 'Card not in hand', 
-        suggestions: ['Select a card from your hand'] 
-      }
+      return { isValid: false, error: 'Card not in hand', suggestions: ['Select a card from your hand'] }
     }
 
     return { isValid: true }
   }
 
   validateResourceCosts(gameState, card, player) {
-    const playerResources = player.role === 'pt_student' 
+    const playerResources = player.id === 'pt_student' 
       ? gameState.ptResources 
       : gameState.patientResources
 
@@ -141,7 +142,7 @@ class CardValidationEngine {
     if (card.energy_cost && playerResources.energy < card.energy_cost) {
       return { 
         isValid: false, 
-        error: `Insufficient energy (need ${card.energy_cost}, have ${playerResources.energy})`,
+        error: `Insufficient energy (need ${card.energy_cost}, have ${playerResources.energy})`, 
         suggestions: ['End turn to regenerate energy', 'Use a lower cost card'] 
       }
     }
@@ -150,7 +151,7 @@ class CardValidationEngine {
     if (card.deflection_cost && playerResources.deflection < card.deflection_cost) {
       return { 
         isValid: false, 
-        error: `Insufficient deflection points (need ${card.deflection_cost}, have ${playerResources.deflection})`,
+        error: `Insufficient deflection points (need ${card.deflection_cost}, have ${playerResources.deflection})`, 
         suggestions: ['Use cards that generate deflection', 'Choose a different strategy'] 
       }
     }
@@ -159,7 +160,7 @@ class CardValidationEngine {
     if (card.emotional_cost && playerResources.emotional < card.emotional_cost) {
       return { 
         isValid: false, 
-        error: `Insufficient emotional resources (need ${card.emotional_cost}, have ${playerResources.emotional})`,
+        error: `Insufficient emotional resources (need ${card.emotional_cost}, have ${playerResources.emotional})`, 
         suggestions: ['Wait for emotional recovery', 'Use communication cards'] 
       }
     }
@@ -172,7 +173,7 @@ class CardValidationEngine {
     if (card.requires_target && !targetId) {
       return { 
         isValid: false, 
-        error: 'This card requires a target',
+        error: 'This card requires a target', 
         suggestions: ['Select a valid target'] 
       }
     }
@@ -181,7 +182,7 @@ class CardValidationEngine {
     if (targetId && !this.isValidTarget(gameState, card, targetId)) {
       return { 
         isValid: false, 
-        error: 'Invalid target for this card',
+        error: 'Invalid target for this card', 
         suggestions: ['Select a different target'] 
       }
     }
@@ -194,7 +195,7 @@ class CardValidationEngine {
     if (card.phase_restrictions && !card.phase_restrictions.includes(gameState.currentPhase)) {
       return { 
         isValid: false, 
-        error: `Cannot play this card during ${gameState.currentPhase} phase`,
+        error: `Cannot play this card during ${gameState.currentPhase} phase`, 
         suggestions: [`Wait for ${card.phase_restrictions.join(' or ')} phase`] 
       }
     }
@@ -203,7 +204,7 @@ class CardValidationEngine {
     if (card.once_per_turn && gameState.cardsPlayedThisTurn.includes(card.id)) {
       return { 
         isValid: false, 
-        error: 'Card already played this turn',
+        error: 'Card already played this turn', 
         suggestions: ['Choose a different card'] 
       }
     }
@@ -212,10 +213,7 @@ class CardValidationEngine {
   }
 
   findCard(gameState, cardId, playerId) {
-    const player = gameState.players.find(p => p.id === playerId)
-    if (!player) return null
-
-    const playerHand = gameState.playerHands[player.role] || []
+    const playerHand = gameState.playerHands[playerId] || []
     return playerHand.find(c => c.id === cardId)
   }
 
@@ -229,7 +227,7 @@ class CardValidationEngine {
 class CardInteractionEngine {
   async calculateInteractions(gameState, cardId, playerId, targetId) {
     const card = this.findCard(gameState, cardId, playerId)
-    const player = gameState.players.find(p => p.id === playerId)
+    const player = { id: playerId, role: playerId }
 
     const interactions = {
       primaryEffects: await this.calculatePrimaryEffects(card, gameState, player, targetId),
@@ -249,10 +247,21 @@ class CardInteractionEngine {
     if (card.energy_cost) {
       effects.push({
         type: 'resource_change',
-        target: player.role === 'pt_student' ? 'ptResources' : 'patientResources',
+        target: player.id === 'pt_student' ? 'ptResources' : 'patientResources',
         property: 'energy',
         change: -card.energy_cost,
         description: `Spend ${card.energy_cost} energy`
+      })
+    }
+
+    // Rapport changes
+    if (card.rapport_change) {
+      effects.push({
+        type: 'resource_change',
+        target: 'ptResources',
+        property: 'rapport',
+        change: card.rapport_change,
+        description: `${card.rapport_change > 0 ? 'Increase' : 'Decrease'} rapport by ${Math.abs(card.rapport_change)}`
       })
     }
 
@@ -277,7 +286,7 @@ class CardInteractionEngine {
 
   async calculateAssessmentEffects(card, gameState) {
     const effects = []
-    
+
     // Reveal clues based on card power
     const cluesRevealed = card.clues_revealed || 1
     effects.push({
@@ -300,7 +309,7 @@ class CardInteractionEngine {
 
   async calculateCommunicationEffects(card, gameState) {
     const effects = []
-    
+
     // Improve rapport
     const rapportChange = card.rapport_change || 1
     effects.push({
@@ -325,7 +334,7 @@ class CardInteractionEngine {
 
   async calculateDeflectionEffects(card, gameState) {
     const effects = []
-    
+
     // Reduce information revealed
     effects.push({
       type: 'information_reduction',
@@ -347,7 +356,7 @@ class CardInteractionEngine {
 
   async calculateEmotionalEffects(card, gameState) {
     const effects = []
-    
+
     // Emotional state changes
     effects.push({
       type: 'emotional_state_change',
@@ -387,9 +396,10 @@ class CardInteractionEngine {
 
   async checkForTriggers(gameState, effect) {
     const triggers = []
-    
+
     // Check active effects for triggers
-    gameState.activeEffects.forEach(activeEffect => {
+    const activeEffects = gameState.activeEffects || { pt_student: [], patient: [] }
+    Object.values(activeEffects).flat().forEach(activeEffect => {
       if (this.effectTriggers(activeEffect, effect)) {
         triggers.push({
           type: 'triggered_effect',
@@ -405,11 +415,11 @@ class CardInteractionEngine {
 
   async identifyResponseOpportunities(gameState, interactions) {
     const opportunities = []
-    
+
     // Check if opponent can counter
     const opponentRole = gameState.currentPlayer === 'pt_student' ? 'patient' : 'pt_student'
     const opponentHand = gameState.playerHands[opponentRole] || []
-    
+
     opponentHand.forEach(card => {
       if (this.canCounter(card, interactions)) {
         opportunities.push({
@@ -455,19 +465,54 @@ class CardInteractionEngine {
     return competencyMap[card.type] || 'general_practice'
   }
 
-  findCard(gameState, cardId, playerId) {
-    const player = gameState.players.find(p => p.id === playerId)
-    if (!player) return null
+  mapToLearningObjective(card) {
+    return `Practice ${card.type.replace('_', ' ')} skills`
+  }
 
-    const playerHand = gameState.playerHands[player.role] || []
+  assessDifficultyLevel(card, gameState) {
+    return gameState.currentCase?.difficulty || 'beginner'
+  }
+
+  assessClinicalRelevance(card) {
+    return 'high' // Simplified for now
+  }
+
+  identifyTeachingMoment(card, gameState) {
+    if (card.type === 'assessment' && gameState.discoveredClues.length === 0) {
+      return 'First assessment - foundation of clinical reasoning'
+    }
+    return null
+  }
+
+  findCard(gameState, cardId, playerId) {
+    const playerHand = gameState.playerHands[playerId] || []
     return playerHand.find(c => c.id === cardId)
+  }
+
+  async calculateSecondaryEffects(card, gameState) {
+    return [] // Simplified for now
+  }
+
+  async identifyCounterableEffects(card, gameState) {
+    return [] // Simplified for now
+  }
+
+  async assessClinicalRealism(card, gameState) {
+    return { score: 85 } // Simplified for now
   }
 }
 
 // Game State Manager
 class GameStateManager {
-  async applyCardEffects(gameState, interactions) {
+  async applyCardEffects(gameState, interactions, card, playerId) {
     const newGameState = JSON.parse(JSON.stringify(gameState)) // Deep clone
+
+    // Remove card from player's hand
+    const playerHand = newGameState.playerHands[playerId] || []
+    const cardIndex = playerHand.findIndex(c => c.id === card.id)
+    if (cardIndex !== -1) {
+      playerHand.splice(cardIndex, 1)
+    }
 
     // Apply primary effects
     for (const effect of interactions.primaryEffects) {
@@ -475,16 +520,19 @@ class GameStateManager {
     }
 
     // Update game log
+    newGameState.gameLog = newGameState.gameLog || []
     newGameState.gameLog.push({
       timestamp: Date.now(),
       action: 'card_played',
+      player: playerId,
+      card: card.name,
       effects: interactions.primaryEffects,
       educational_impact: interactions.educationalImpact
     })
 
     // Update turn state
     newGameState.cardsPlayedThisTurn = newGameState.cardsPlayedThisTurn || []
-    newGameState.cardsPlayedThisTurn.push(interactions.cardId)
+    newGameState.cardsPlayedThisTurn.push(card.id)
 
     return newGameState
   }
@@ -517,6 +565,8 @@ class GameStateManager {
   }
 
   revealClues(gameState, effect) {
+    gameState.discoveredClues = gameState.discoveredClues || []
+    
     for (let i = 0; i < effect.count; i++) {
       const clue = this.generateClue(gameState, effect.category)
       if (clue) {
@@ -561,6 +611,42 @@ class GameStateManager {
     const rapportModifier = (gameState.ptResources.rapport - 5) * 0.03
     
     return Math.max(0.1, Math.min(1.0, baseConfidence + cooperationModifier + rapportModifier))
+  }
+
+  updateDiagnosticProgress(gameState, effect) {
+    // Update diagnostic confidence
+    gameState.competencyProgress = gameState.competencyProgress || {}
+    gameState.competencyProgress.diagnostic_accuracy = 
+      (gameState.competencyProgress.diagnostic_accuracy || 50) + effect.confidence_increase
+  }
+
+  updateEmotionalState(gameState, effect) {
+    gameState.activeEffects = gameState.activeEffects || { pt_student: [], patient: [] }
+    gameState.activeEffects.patient.push({
+      id: `emotion_${Date.now()}`,
+      name: effect.emotion,
+      description: effect.description,
+      duration: 3 // turns
+    })
+  }
+
+  addComplexity(gameState, effect) {
+    gameState.complexity = gameState.complexity || []
+    gameState.complexity.push({
+      type: effect.complexity_type,
+      description: effect.description,
+      active: true
+    })
+  }
+
+  async applyChainedEffects(gameState, chainedEffects) {
+    const newGameState = { ...gameState }
+    
+    for (const effect of chainedEffects) {
+      await this.applyEffect(newGameState, effect)
+    }
+    
+    return newGameState
   }
 
   generateChecksum(gameState) {
@@ -619,7 +705,7 @@ class PredictiveGameStateEngine {
 
     // Adjust based on game state
     const player = gameState.currentPlayer === 'pt_student' ? gameState.ptResources : gameState.patientResources
-    
+
     // Resource availability
     if (card.energy_cost && player.energy >= card.energy_cost) {
       probability += 0.2
@@ -645,11 +731,9 @@ class PredictiveGameStateEngine {
     if (card.type === 'communication' && gameState.ptResources.rapport < 3) {
       return true
     }
-    
     if (card.type === 'assessment' && gameState.discoveredClues.length < 3) {
       return true
     }
-
     return false
   }
 
@@ -658,8 +742,40 @@ class PredictiveGameStateEngine {
     if (gameState.turnNumber > gameState.maxTurns - 3) {
       return card.type === 'assessment' || card.type === 'clinical_reasoning'
     }
-
     return false
+  }
+
+  assessCardImpact(card, gameState) {
+    // Assess the potential impact of playing this card
+    let impact = 5 // Base impact
+
+    if (card.type === 'assessment') {
+      impact += card.clues_revealed || 1
+    }
+
+    if (card.type === 'communication') {
+      impact += Math.abs(card.rapport_change || 1)
+    }
+
+    if (card.type === 'deflection') {
+      impact += 3
+    }
+
+    return impact
+  }
+
+  suggestCounterStrategies(card, gameState) {
+    const strategies = []
+
+    if (card.type === 'deflection') {
+      strategies.push('Use empathy or explanation cards to address concerns')
+    }
+
+    if (card.type === 'emotional_state') {
+      strategies.push('Respond with therapeutic communication')
+    }
+
+    return strategies
   }
 
   async suggestOptimalPlays(gameState) {
@@ -671,7 +787,7 @@ class PredictiveGameStateEngine {
     for (const card of playerHand) {
       const value = await this.calculatePlayValue(card, gameState)
       const risk = await this.calculatePlayRisk(card, gameState)
-      
+
       playOptions.push({
         card: card,
         value: value,
@@ -704,7 +820,7 @@ class PredictiveGameStateEngine {
     // Higher value for cards that target learning objectives
     const competency = this.identifyTargetedCompetency(card)
     const playerProgress = gameState.competencyProgress?.[competency] || 0
-    
+
     // More value for competencies that need improvement
     return (100 - playerProgress) / 10
   }
@@ -724,6 +840,59 @@ class PredictiveGameStateEngine {
     return value
   }
 
+  calculateProgressValue(card, gameState) {
+    // Value based on game progress
+    const turnProgress = gameState.turnNumber / gameState.maxTurns
+
+    if (turnProgress > 0.7 && card.type === 'assessment') {
+      return 20 // High value for assessments late in game
+    }
+
+    return 5
+  }
+
+  async calculatePlayRisk(card, gameState) {
+    let risk = 0
+
+    // Resource cost risk
+    if (card.energy_cost) {
+      const playerResources = gameState.currentPlayer === 'pt_student' 
+        ? gameState.ptResources 
+        : gameState.patientResources
+      
+      const energyRatio = card.energy_cost / playerResources.energy
+      if (energyRatio > 0.5) {
+        risk += 10
+      }
+    }
+
+    // Opponent counter risk
+    const opponentRole = gameState.currentPlayer === 'pt_student' ? 'patient' : 'pt_student'
+    const opponentHand = gameState.playerHands[opponentRole] || []
+    
+    const canBeCountered = opponentHand.some(opponentCard => 
+      opponentCard.counters && opponentCard.counters.includes(card.type)
+    )
+    
+    if (canBeCountered) {
+      risk += 15
+    }
+
+    return risk
+  }
+
+  generatePlayReasoning(card, gameState, value, risk) {
+    if (value > risk + 10) {
+      return `Strong play - ${card.name} addresses key learning objectives`
+    }
+    
+    if (risk > value + 5) {
+      return `Risky play - ${card.name} may be countered or too costly`
+    }
+    
+    return `Balanced play - ${card.name} offers moderate benefit`
+  }
+
   identifyTargetedCompetency(card) {
     const competencyMap = {
       'assessment': 'diagnostic_accuracy',
@@ -731,6 +900,18 @@ class PredictiveGameStateEngine {
       'clinical_reasoning': 'clinical_reasoning'
     }
     return competencyMap[card.type] || 'general'
+  }
+
+  async assessRisks(gameState) {
+    return [] // Simplified for now
+  }
+
+  async identifyLearningOpportunities(gameState) {
+    return [] // Simplified for now
+  }
+
+  async predictGameEnd(gameState) {
+    return {} // Simplified for now
   }
 }
 
@@ -837,7 +1018,6 @@ class PatientVictorySystem {
     Object.keys(this.victoryConditions).forEach(condition => {
       const progress = victoryProgress[condition]
       const maxPoints = this.victoryConditions[condition].points
-      
       score += (progress.progress_percentage / 100) * maxPoints
     })
 
@@ -887,7 +1067,10 @@ class PatientVictorySystem {
   checkGameEndConditions(gameState, update) {
     // Check if maximum turns reached
     if (gameState.turnNumber >= gameState.maxTurns) {
-      return { reason: 'max_turns_reached', winner: this.determineWinner(update) }
+      return {
+        reason: 'max_turns_reached',
+        winner: this.determineWinner(update)
+      }
     }
 
     // Check if patient achieved major victory condition
@@ -896,13 +1079,19 @@ class PatientVictorySystem {
     )
 
     if (patientVictoryAchieved) {
-      return { reason: 'patient_victory', winner: 'patient' }
+      return {
+        reason: 'patient_victory',
+        winner: 'patient'
+      }
     }
 
     // Check if PT achieved diagnostic success
     const diagnosticAccuracy = this.calculateDiagnosticAccuracy(gameState)
     if (diagnosticAccuracy >= 90 && gameState.discoveredClues.length >= 5) {
-      return { reason: 'diagnostic_success', winner: 'pt_student' }
+      return {
+        reason: 'diagnostic_success',
+        winner: 'pt_student'
+      }
     }
 
     return false
@@ -920,7 +1109,9 @@ class PatientVictorySystem {
 
   // Helper methods for scoring calculations
   countLearningMomentsCreated(gameState) {
-    return gameState.gameLog?.filter(log => log.educational_impact?.teaching_moment).length || 0
+    return gameState.gameLog?.filter(log => 
+      log.educational_impact?.teaching_moment
+    ).length || 0
   }
 
   countBiasRecognitionEvents(gameState) {
@@ -934,7 +1125,6 @@ class PatientVictorySystem {
     const communicationLogs = logs.filter(log => 
       log.educational_impact?.competency_targeted === 'therapeutic_communication'
     )
-    
     return communicationLogs.length > 0 ? 1 : 0
   }
 
@@ -942,7 +1132,6 @@ class PatientVictorySystem {
     // Calculate based on deflection appropriateness and patient behavior consistency
     const deflectionAppropriate = this.calculateDeflectionAppropriateness(gameState)
     const behaviorConsistent = this.calculateBehaviorConsistency(gameState)
-    
     return (deflectionAppropriate * 0.6 + behaviorConsistent * 0.4) * 100
   }
 
@@ -1004,23 +1193,23 @@ class PatientVictorySystem {
 
   calculateProgressPercentage(condition, progress) {
     const criteria = this.victoryConditions[condition].criteria
-    
+
     switch (condition) {
       case 'educational_catalyst':
         const learningProgress = Math.min(100, 
           (progress.learning_moments / criteria.learning_moments_created) * 100
         )
         return learningProgress
-        
+
       case 'authentic_representation':
         return Math.min(100, progress.realism_score)
-        
+
       case 'collaborative_achievement':
         const improvementProgress = Math.min(100, 
           (progress.pt_improvement / criteria.pt_accuracy_improvement) * 100
         )
         return improvementProgress
-        
+
       default:
         return 0
     }
@@ -1032,7 +1221,7 @@ class PatientVictorySystem {
     const correctClues = gameState.discoveredClues?.filter(clue => 
       clue.confidence > 0.7
     ).length || 0
-    
+
     return Math.min(100, (correctClues / totalPossibleClues) * 100)
   }
 
@@ -1045,7 +1234,7 @@ class PatientVictorySystem {
   calculateEfficiencyScore(gameState) {
     const optimalTurns = gameState.maxTurns * 0.7 // 70% of max turns is optimal
     const actualTurns = gameState.turnNumber
-    
+
     if (actualTurns <= optimalTurns) {
       return 100
     } else {

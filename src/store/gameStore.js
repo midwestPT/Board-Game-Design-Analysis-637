@@ -1,8 +1,8 @@
-import { create } from 'zustand'
-import { supabase } from '../lib/supabase'
-import { demoService } from '../services/demoService'
-import { gameEngine } from '../engine/GameEngine'
-import { multiplayerSync } from '../engine/MultiplayerSync'
+import {create} from 'zustand'
+import {supabase} from '../lib/supabase'
+import {demoService} from '../services/demoService'
+import {gameEngine} from '../engine/GameEngine'
+import {aiOpponent} from '../services/aiOpponentService'
 
 const useGameStore = create((set, get) => ({
   gameState: null,
@@ -10,22 +10,24 @@ const useGameStore = create((set, get) => ({
   gameId: null,
   loading: false,
   error: null,
-  isDemoMode: !supabase,
   predictions: null,
   victoryStatus: null,
+  aiThinking: false,
+  playerRole: 'pt_student', // Add this to track the human player's role
 
   initializeGame: async (config) => {
     set({ loading: true, error: null })
     
     try {
-      let game
+      // Create game
+      const game = await demoService.createGame(config)
       
-      if (!supabase) {
-        // Demo mode
-        game = await demoService.createGame(config)
-      } else {
-        // Real Supabase game creation would go here
-        game = await demoService.createGame(config) // Fallback to demo for now
+      // Set the human player's role
+      const humanPlayerRole = config.playerRole === 'pt' ? 'pt_student' : 'patient'
+      
+      // Initialize AI opponent if playing against AI
+      if (config.mode === 'ai') {
+        await aiOpponent.initializeAI(config, game.game_state)
       }
 
       // Generate initial predictions
@@ -35,12 +37,17 @@ const useGameStore = create((set, get) => ({
         gameState: game.game_state,
         gameId: game.id,
         currentPlayer: game.game_state.currentPlayer,
+        playerRole: humanPlayerRole, // Store human player role
         predictions: predictions,
-        loading: false
+        loading: false,
+        error: null
       })
 
+      console.log('Game initialized successfully:', game.id)
+      console.log('Human player role:', humanPlayerRole)
       return game
     } catch (error) {
+      console.error('Error initializing game:', error)
       set({ error: error.message, loading: false })
       throw error
     }
@@ -48,22 +55,33 @@ const useGameStore = create((set, get) => ({
 
   playCard: async (cardId, targetId = null) => {
     const state = get()
-    const { gameState, currentPlayer, gameId } = state
-    
-    if (!gameState) return
+    const { gameState, currentPlayer, gameId, playerRole } = state
+
+    if (!gameState) {
+      console.error('No game state available')
+      return { success: false, error: 'No active game' }
+    }
+
+    // Check if it's the human player's turn
+    if (currentPlayer !== playerRole) {
+      console.error('Not player turn:', { currentPlayer, playerRole })
+      return { success: false, error: 'Not your turn' }
+    }
 
     try {
+      console.log(`Playing card ${cardId} for player ${currentPlayer}`)
+
       // Use game engine to process card play
       const result = await gameEngine.processCardPlay(
-        gameState, 
-        cardId, 
-        currentPlayer, 
+        gameState,
+        cardId,
+        currentPlayer,
         targetId
       )
 
       if (!result.success) {
         set({ error: result.error })
-        return { success: false, error: result.error, suggestions: result.suggestions }
+        return result
       }
 
       // Update local state
@@ -74,14 +92,11 @@ const useGameStore = create((set, get) => ({
         error: null
       })
 
-      // Sync with multiplayer if applicable
-      if (gameState.isMultiplayer) {
-        await multiplayerSync.synchronizeGameState(
-          gameId,
-          result.gameState,
-          currentPlayer,
-          { type: 'play_card', cardId, targetId }
-        )
+      console.log('Card played successfully:', result.interactions)
+
+      // If playing against AI and it's now the AI's turn, trigger AI response
+      if (result.gameState.currentPlayer !== playerRole && gameState.game_mode === 'ai') {
+        setTimeout(() => get().handleAITurn(), 1000) // Small delay for better UX
       }
 
       return {
@@ -96,23 +111,102 @@ const useGameStore = create((set, get) => ({
     }
   },
 
-  endTurn: async () => {
+  handleAITurn: async () => {
     const state = get()
-    const { gameState, currentPlayer } = state
-    
-    if (!gameState) return
+    const { gameState, playerRole } = state
+
+    if (!gameState || gameState.currentPlayer === playerRole) {
+      console.log('Not AI turn or no game state')
+      return
+    }
 
     try {
+      set({ aiThinking: true })
+      console.log('AI is thinking...')
+
+      // Determine AI player role (opposite of human player)
+      const aiPlayerRole = playerRole === 'pt_student' ? 'patient' : 'pt_student'
+
+      // Get AI response
+      const aiResponse = await aiOpponent.generateAIResponse(gameState, null)
+
+      if (aiResponse.action === 'play_card') {
+        console.log('AI playing card:', aiResponse.cardId, aiResponse.reasoning)
+
+        // Process AI card play
+        const result = await gameEngine.processCardPlay(
+          gameState,
+          aiResponse.cardId,
+          aiPlayerRole,
+          null
+        )
+
+        if (result.success) {
+          // Add AI reasoning to game log
+          result.gameState.gameLog.push({
+            timestamp: Date.now(),
+            action: 'ai_card_played',
+            player: aiPlayerRole,
+            message: aiResponse.reasoning,
+            personality_context: aiResponse.personality_context
+          })
+
+          // Generate new predictions for human player
+          const predictions = await gameEngine.predictionEngine.generatePredictions(result.gameState)
+
+          set({
+            gameState: result.gameState,
+            predictions: predictions,
+            victoryStatus: result.victoryUpdate,
+            currentPlayer: result.gameState.currentPlayer,
+            aiThinking: false
+          })
+
+          console.log('AI turn completed successfully')
+        } else {
+          console.error('AI card play failed:', result.error)
+          set({ aiThinking: false })
+        }
+      } else {
+        console.log('AI chose not to play a card:', aiResponse.message)
+        // AI passes, switch back to human player
+        await get().endTurn()
+      }
+    } catch (error) {
+      console.error('Error during AI turn:', error)
+      set({ aiThinking: false, error: error.message })
+    }
+  },
+
+  endTurn: async () => {
+    const state = get()
+    const { gameState, currentPlayer, playerRole } = state
+
+    if (!gameState) return
+
+    // Only allow human player to end their own turn
+    if (currentPlayer !== playerRole) {
+      console.log('Cannot end turn - not player turn')
+      return
+    }
+
+    try {
+      console.log(`Ending turn for ${currentPlayer}`)
       const newGameState = { ...gameState }
-      
-      // Switch players
-      const nextPlayer = currentPlayer === 'pt_student' ? 'patient' : 'pt_student'
-      
-      // If returning to PT student, increment turn
-      if (nextPlayer === 'pt_student') {
+
+      // Determine next player (opposite role)
+      const nextPlayer = playerRole === 'pt_student' ? 'patient' : 'pt_student'
+
+      // If returning to human player, increment turn
+      if (nextPlayer === playerRole) {
         newGameState.turnNumber += 1
-        // Regenerate energy
-        newGameState.ptResources.energy = Math.min(12, newGameState.ptResources.energy + 2)
+        // Regenerate energy for human player
+        if (playerRole === 'pt_student') {
+          newGameState.ptResources.energy = Math.min(12, newGameState.ptResources.energy + 3)
+        } else {
+          newGameState.patientResources.energy = Math.min(12, newGameState.patientResources.energy + 3)
+        }
+        console.log(`Starting turn ${newGameState.turnNumber}`)
       }
 
       // Clear cards played this turn
@@ -120,15 +214,23 @@ const useGameStore = create((set, get) => ({
 
       // Draw card if hand size below 5
       const currentHand = newGameState.playerHands[nextPlayer]
-      if (currentHand.length < 5) {
-        const newCard = demoService.generateStartingHand(nextPlayer)[0]
+      if (currentHand && currentHand.length < 5) {
+        const newCard = get().drawCard(nextPlayer, newGameState.currentCase.id)
         if (newCard) {
-          newCard.id = `${newCard.id}_${Date.now()}`
           newGameState.playerHands[nextPlayer].push(newCard)
+          console.log(`${nextPlayer} drew a new card: ${newCard.name}`)
         }
       }
 
       newGameState.currentPlayer = nextPlayer
+
+      // Add turn change to log
+      newGameState.gameLog.push({
+        timestamp: Date.now(),
+        action: 'turn_ended',
+        player: currentPlayer,
+        message: `${currentPlayer} ended their turn. ${nextPlayer}'s turn begins.`
+      })
 
       // Generate new predictions
       const predictions = await gameEngine.predictionEngine.generatePredictions(newGameState)
@@ -146,54 +248,31 @@ const useGameStore = create((set, get) => ({
       // Check for game end
       if (victoryUpdate.game_end_triggered) {
         await get().endGame(victoryUpdate.game_end_triggered)
+        return
       }
 
+      // If it's now the AI's turn, trigger AI response
+      if (nextPlayer !== playerRole && gameState.game_mode === 'ai') {
+        setTimeout(() => get().handleAITurn(), 1500)
+      }
     } catch (error) {
       console.error('Error ending turn:', error)
       set({ error: error.message })
     }
   },
 
-  // New method for handling counter cards during opponent's turn
-  playCounterCard: async (cardId, targetActionId) => {
-    const state = get()
-    const { gameState, currentPlayer } = state
+  drawCard: (playerType, caseId) => {
+    // Generate a new card for the player
+    const cardPool = playerType === 'pt_student' 
+      ? demoService.generatePTCards(caseId) 
+      : demoService.generatePatientCards(caseId)
 
-    if (!gameState) return
+    if (cardPool.length === 0) return null
 
-    try {
-      // Validate counter timing
-      const validation = await gameEngine.validators.validateCounterPlay(
-        gameState, 
-        cardId, 
-        currentPlayer, 
-        targetActionId
-      )
-
-      if (!validation.isValid) {
-        return { success: false, error: validation.error }
-      }
-
-      // Process counter card
-      const result = await gameEngine.processCardPlay(
-        gameState, 
-        cardId, 
-        currentPlayer, 
-        targetActionId
-      )
-
-      if (result.success) {
-        set({
-          gameState: result.gameState,
-          predictions: result.predictions,
-          victoryStatus: result.victoryUpdate
-        })
-      }
-
-      return result
-    } catch (error) {
-      console.error('Error playing counter card:', error)
-      return { success: false, error: error.message }
+    const randomCard = cardPool[Math.floor(Math.random() * cardPool.length)]
+    return {
+      ...randomCard,
+      id: `${randomCard.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     }
   },
 
@@ -220,17 +299,28 @@ const useGameStore = create((set, get) => ({
     const { gameState, gameId } = state
 
     try {
+      console.log('Game ending:', endCondition)
+
       // Calculate final scores
-      const finalScores = await gameEngine.victorySystem.calculateFinalScores(gameState)
-      
+      const finalScores = {
+        pt_score: gameEngine.victorySystem.calculatePTScore(gameState),
+        patient_score: gameEngine.victorySystem.calculatePatientScore(state.victoryStatus?.victory_progress || {}),
+        accuracy: Math.round((gameState.discoveredClues.length / 10) * 100),
+        efficiency: Math.round(((gameState.maxTurns - gameState.turnNumber) / gameState.maxTurns) * 100),
+        communication: Math.round((gameState.ptResources.rapport / 10) * 100)
+      }
+
       // Generate educational summary
-      const educationalSummary = await gameEngine.generateEducationalSummary(gameState)
+      const educationalSummary = {
+        competencies_demonstrated: Object.keys(gameState.competencyProgress),
+        learning_moments: state.victoryStatus?.learning_moments || [],
+        areas_for_improvement: [],
+        clinical_insights: []
+      }
 
       // Save game performance
       if (gameId) {
-        await get().saveGamePerformance({
-          userId: gameState.players[0].id, // Assuming single player for demo
-          gameId: gameId,
+        await demoService.saveGamePerformance(gameId, state.gameState?.creator_id, {
           ...finalScores,
           endCondition: endCondition,
           educationalSummary: educationalSummary
@@ -238,78 +328,41 @@ const useGameStore = create((set, get) => ({
       }
 
       set({
-        gameState: { ...gameState, status: 'completed', endCondition, finalScores },
+        gameState: {
+          ...gameState,
+          status: 'completed',
+          endCondition,
+          finalScores
+        },
         predictions: null,
-        victoryStatus: { ...state.victoryStatus, game_completed: true, finalScores }
+        victoryStatus: {
+          ...state.victoryStatus,
+          game_completed: true,
+          finalScores
+        }
       })
 
-      return {
-        finalScores,
-        educationalSummary,
-        endCondition
-      }
+      console.log('Game ended successfully:', finalScores)
+      return { finalScores, educationalSummary, endCondition }
     } catch (error) {
       console.error('Error ending game:', error)
       set({ error: error.message })
     }
   },
 
-  saveGamePerformance: async (performanceData) => {
-    const state = get()
-    const { gameId } = state
-    
-    if (!gameId) return
-
-    try {
-      if (!supabase) {
-        await demoService.saveGamePerformance(gameId, performanceData.userId, performanceData)
-      } else {
-        // Real Supabase save would go here
-        await demoService.saveGamePerformance(gameId, performanceData.userId, performanceData)
-      }
-    } catch (error) {
-      console.error('Error saving game performance:', error)
-    }
-  },
-
-  // Multiplayer specific methods
-  joinMultiplayerGame: async (roomId) => {
-    try {
-      // Initialize multiplayer connection
-      const websocket = new WebSocket(`ws://localhost:3001/game/${roomId}`)
-      
-      await new Promise((resolve, reject) => {
-        websocket.onopen = () => {
-          multiplayerSync.initializeConnection(roomId, 'current_player_id', websocket)
-          resolve()
-        }
-        websocket.onerror = reject
-      })
-
-      set({ isMultiplayer: true, roomId: roomId })
-    } catch (error) {
-      console.error('Error joining multiplayer game:', error)
-      set({ error: 'Failed to join multiplayer game' })
-    }
-  },
-
-  handleMultiplayerUpdate: (update) => {
-    const state = get()
-    
-    // Handle different types of multiplayer updates
-    switch (update.type) {
-      case 'game_state_sync':
-        set({ gameState: update.gameState })
-        break
-      case 'player_disconnected':
-        // Handle player disconnection
-        console.log('Player disconnected:', update.playerId)
-        break
-      case 'conflict_resolution':
-        // Handle conflict resolution
-        console.log('Conflict resolved:', update.resolution)
-        break
-    }
+  // Reset game state
+  resetGame: () => {
+    set({
+      gameState: null,
+      currentPlayer: 'pt_student',
+      gameId: null,
+      loading: false,
+      error: null,
+      predictions: null,
+      victoryStatus: null,
+      aiThinking: false,
+      playerRole: 'pt_student'
+    })
   }
 }))
 

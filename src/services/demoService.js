@@ -1,4 +1,4 @@
-// Demo service for offline gameplay without Supabase
+// Enhanced demo service with complete game functionality
 export class DemoService {
   constructor() {
     this.isDemo = true
@@ -71,10 +71,7 @@ export class DemoService {
       this.currentUser = this.gameData.users['demo-user-123']
     }
     
-    return {
-      user: this.currentUser,
-      session: { access_token: 'demo-token' }
-    }
+    return { user: this.currentUser, session: { access_token: 'demo-token' } }
   }
 
   async signUp(email, password, userData) {
@@ -91,10 +88,7 @@ export class DemoService {
     this.gameData.users[newUser.id] = newUser
     this.currentUser = newUser
     
-    return {
-      user: newUser,
-      session: { access_token: 'demo-token' }
-    }
+    return { user: newUser, session: { access_token: 'demo-token' } }
   }
 
   async signOut() {
@@ -106,7 +100,7 @@ export class DemoService {
     return this.currentUser
   }
 
-  // Mock game creation
+  // Enhanced game creation with complete card sets
   async createGame(gameConfig) {
     await this.delay(300)
     
@@ -128,34 +122,71 @@ export class DemoService {
 
   generateInitialGameState(config) {
     return {
+      id: `game-${Date.now()}`,
       turnNumber: 1,
-      maxTurns: config.difficulty === 'beginner' ? 10 : config.difficulty === 'intermediate' ? 8 : 6,
+      maxTurns: config.difficulty === 'beginner' ? 12 : config.difficulty === 'intermediate' ? 10 : 8,
+      currentPlayer: 'pt_student',
+      currentPhase: 'assessment',
+      isMultiplayer: false,
+      
       currentCase: {
         id: config.case,
         title: this.getCaseTitle(config.case),
-        difficulty: config.difficulty
+        difficulty: config.difficulty,
+        description: this.getCaseDescription(config.case)
       },
+      
+      // Player resources
       ptResources: {
         energy: 10,
-        rapport: 5
+        rapport: 5,
+        confidence: 50
       },
+      
       patientResources: {
-        cooperation: 7,
+        cooperation: this.getInitialCooperation(config.difficulty),
         deflection: 8,
-        emotional: 6
+        emotional: 6,
+        energy: 10
       },
+      
+      // Player hands with complete card sets
       playerHands: {
-        pt_student: this.generateStartingHand('pt_student'),
-        patient: this.generateStartingHand('patient')
+        pt_student: this.generateStartingHand('pt_student', config.case),
+        patient: this.generateStartingHand('patient', config.case)
       },
+      
+      // Game state tracking
       discoveredClues: [],
       activeEffects: {
         pt_student: [],
         patient: []
       },
-      gameLog: [],
-      currentPlayer: 'pt_student'
+      gameLog: [{
+        timestamp: Date.now(),
+        action: 'game_started',
+        player: 'system',
+        message: `Game started: ${this.getCaseTitle(config.case)} (${config.difficulty})`
+      }],
+      cardsPlayedThisTurn: [],
+      
+      // Victory tracking
+      competencyProgress: {
+        diagnostic_accuracy: 50,
+        communication_skills: 50,
+        clinical_reasoning: 50,
+        efficiency: 50
+      }
     }
+  }
+
+  getInitialCooperation(difficulty) {
+    const cooperationLevels = {
+      'beginner': 8,
+      'intermediate': 6,
+      'advanced': 4
+    }
+    return cooperationLevels[difficulty] || 7
   }
 
   getCaseTitle(caseId) {
@@ -168,95 +199,226 @@ export class DemoService {
     return cases[caseId] || 'Unknown Case'
   }
 
-  generateStartingHand(playerType) {
-    const ptCards = [
+  getCaseDescription(caseId) {
+    const descriptions = {
+      ankle_sprain: 'A 23-year-old basketball player presents with acute ankle pain following an inversion injury during practice.',
+      low_back_pain: 'A 45-year-old office worker with a 6-month history of lower back pain and functional limitations.',
+      shoulder_impingement: 'A 28-year-old swimmer experiencing gradual onset shoulder pain with overhead activities.',
+      fibromyalgia: 'A 38-year-old patient with widespread pain and fatigue affecting daily activities.'
+    }
+    return descriptions[caseId] || 'Patient case description'
+  }
+
+  generateStartingHand(playerType, caseId) {
+    if (playerType === 'pt_student') {
+      return this.generatePTCards(caseId)
+    } else {
+      return this.generatePatientCards(caseId)
+    }
+  }
+
+  generatePTCards(caseId) {
+    const baseCards = [
       {
-        id: 'rom_test_1',
-        name: 'Range of Motion Test',
-        type: 'assessment',
-        energy_cost: 2,
-        rarity: 'common',
-        card_text: 'Reveal 1 Physical Finding. Patient may play 1 Deflection card in response.',
-        flavor_text: 'A systematic approach to understanding joint mobility limitations.'
-      },
-      {
-        id: 'pain_scale_1',
-        name: 'Pain Scale Assessment',
+        id: 'pt_history_1',
+        name: 'History Taking',
         type: 'history_taking',
         energy_cost: 1,
         rarity: 'common',
-        card_text: 'Reveals current pain level (1-10). Patient may modify by ±2.',
-        flavor_text: 'Understanding the patient\'s subjective experience of pain.'
+        card_text: 'Ask about onset, duration, and aggravating factors. Gain 1 clue.',
+        flavor_text: 'A thorough history is the foundation of diagnosis.',
+        clues_revealed: 1,
+        assessment_category: 'history'
       },
       {
-        id: 'empathy_1',
-        name: 'Therapeutic Empathy',
+        id: 'pt_observation_1',
+        name: 'Visual Observation',
+        type: 'assessment',
+        energy_cost: 1,
+        rarity: 'common',
+        card_text: 'Observe posture, gait, and visible signs. Gain 1 clue.',
+        flavor_text: 'Sometimes the most important information is what you can see.',
+        clues_revealed: 1,
+        assessment_category: 'observation'
+      },
+      {
+        id: 'pt_palpation_1',
+        name: 'Palpation Assessment',
+        type: 'assessment',
+        energy_cost: 2,
+        rarity: 'common',
+        card_text: 'Palpate for tenderness, swelling, and temperature. Gain 1-2 clues.',
+        flavor_text: 'Skilled hands can detect what eyes cannot see.',
+        clues_revealed: 2,
+        assessment_category: 'physical_exam'
+      },
+      {
+        id: 'pt_empathy_1',
+        name: 'Show Empathy',
         type: 'communication',
         energy_cost: 0,
         rarity: 'common',
-        card_text: 'Counters Patient emotional cards. Maintains cooperation level.',
-        flavor_text: 'The foundation of effective therapeutic relationships.'
+        card_text: 'Demonstrate understanding and validation. +1 Rapport.',
+        flavor_text: 'Empathy is the cornerstone of therapeutic relationships.',
+        rapport_change: 1,
+        counters_emotional: true
       },
       {
-        id: 'functional_test_1',
-        name: 'Functional Movement Screen',
-        type: 'assessment',
-        energy_cost: 3,
-        rarity: 'uncommon',
-        card_text: 'Reveal 2 Movement Patterns. Costs 1 less energy if patient cooperation > 7.',
-        flavor_text: 'Observing how the patient moves in real-world contexts.'
-      },
-      {
-        id: 'active_listening_1',
-        name: 'Active Listening',
+        id: 'pt_explanation_1',
+        name: 'Clear Explanation',
         type: 'communication',
         energy_cost: 1,
         rarity: 'common',
-        card_text: 'Draw 1 card. Patient reveals 1 additional clue this turn.',
-        flavor_text: 'Sometimes the most important information comes from truly hearing the patient.'
+        card_text: 'Explain procedures and findings clearly. +1 Rapport, reduces patient anxiety.',
+        flavor_text: 'Knowledge shared is fear reduced.',
+        rapport_change: 1
       }
     ]
 
-    const patientCards = [
+    // Add case-specific cards
+    const caseSpecificCards = this.getCaseSpecificPTCards(caseId)
+    
+    return [...baseCards, ...caseSpecificCards].slice(0, 5)
+  }
+
+  getCaseSpecificPTCards(caseId) {
+    const caseCards = {
+      ankle_sprain: [
+        {
+          id: 'pt_ottawa_rules',
+          name: 'Ottawa Ankle Rules',
+          type: 'assessment',
+          energy_cost: 2,
+          rarity: 'uncommon',
+          card_text: 'Apply evidence-based decision rules. High accuracy clue about fracture risk.',
+          flavor_text: 'Evidence-based practice guides clinical decisions.',
+          clues_revealed: 1,
+          assessment_category: 'special_test',
+          confidence_boost: 20
+        },
+        {
+          id: 'pt_stress_test',
+          name: 'Ligament Stress Test',
+          type: 'assessment',
+          energy_cost: 3,
+          rarity: 'uncommon',
+          card_text: 'Test ligament integrity. May cause discomfort.',
+          flavor_text: 'Careful testing reveals the extent of injury.',
+          clues_revealed: 2,
+          assessment_category: 'special_test'
+        }
+      ],
+      low_back_pain: [
+        {
+          id: 'pt_red_flags',
+          name: 'Red Flag Screening',
+          type: 'assessment',
+          energy_cost: 2,
+          rarity: 'uncommon',
+          card_text: 'Screen for serious pathology. Critical safety assessment.',
+          flavor_text: 'Some things cannot be missed.',
+          clues_revealed: 1,
+          assessment_category: 'safety',
+          confidence_boost: 25
+        }
+      ]
+    }
+
+    return caseCards[caseId] || []
+  }
+
+  generatePatientCards(caseId) {
+    const baseCards = [
       {
-        id: 'minimize_1',
+        id: 'patient_minimize_1',
         name: 'Minimize Symptoms',
         type: 'deflection',
         deflection_cost: 1,
         rarity: 'common',
-        card_text: 'Reduce reported pain/dysfunction by 50%. "It\'s not that bad, really."',
-        flavor_text: 'Many patients downplay their symptoms to avoid seeming weak.'
+        card_text: 'Downplay pain and dysfunction. "It\'s not that bad, really."',
+        flavor_text: 'Many patients minimize symptoms to avoid appearing weak.',
+        information_reduction: 0.5
       },
       {
-        id: 'anxiety_1',
-        name: 'Performance Anxiety',
+        id: 'patient_anxiety_1',
+        name: 'Test Anxiety',
         type: 'emotional_state',
         emotional_cost: 2,
         rarity: 'common',
-        card_text: 'PT must play Communication card or lose 1 rapport point.',
-        flavor_text: 'Being observed during movement can make anyone self-conscious.'
+        card_text: 'Feel anxious about examination. PT must use communication or lose rapport.',
+        flavor_text: 'Being examined can trigger vulnerability and fear.',
+        emotion_type: 'anxiety',
+        requires_response: 'communication'
       },
       {
-        id: 'previous_bad_experience_1',
+        id: 'patient_cooperate_1',
+        name: 'Full Cooperation',
+        type: 'cooperation',
+        energy_cost: 1,
+        rarity: 'common',
+        card_text: 'Provide complete and honest responses. PT gains bonus clue.',
+        flavor_text: 'When trust is established, patients open up.',
+        cooperation_bonus: true
+      },
+      {
+        id: 'patient_previous_exp_1',
         name: 'Previous Bad Experience',
         type: 'deflection',
         deflection_cost: 2,
         rarity: 'uncommon',
-        card_text: 'Counter any Assessment card. "Last time they did that test, it made everything worse."',
-        flavor_text: 'Past negative experiences with healthcare can create lasting hesitation.'
+        card_text: 'Counter assessment card. "Last time they did that, it made things worse."',
+        flavor_text: 'Past negative experiences create lasting hesitation.',
+        counters: ['assessment']
       },
       {
-        id: 'stoic_presentation_1',
-        name: 'Stoic Presentation',
+        id: 'patient_pain_focus_1',
+        name: 'Pain-Focused Response',
         type: 'emotional_state',
         emotional_cost: 1,
         rarity: 'common',
-        card_text: 'All pain ratings reduced by 2. "I can handle it."',
-        flavor_text: 'Cultural or personal beliefs about showing weakness affect symptom reporting.'
+        card_text: 'Emphasize pain above all else. May miss other important symptoms.',
+        flavor_text: 'When pain dominates, other symptoms fade into background.',
+        emotion_type: 'pain_focus',
+        information_reduction: 0.3
       }
     ]
 
-    return playerType === 'pt_student' ? ptCards : patientCards
+    // Add case-specific patient cards
+    const caseSpecificCards = this.getCaseSpecificPatientCards(caseId)
+    
+    return [...baseCards, ...caseSpecificCards].slice(0, 5)
+  }
+
+  getCaseSpecificPatientCards(caseId) {
+    const caseCards = {
+      ankle_sprain: [
+        {
+          id: 'patient_athlete_impatience',
+          name: 'Athletic Impatience',
+          type: 'emotional_state',
+          emotional_cost: 2,
+          rarity: 'uncommon',
+          card_text: 'Focus only on return-to-play timeline. "When can I get back out there?"',
+          flavor_text: 'Athletes often prioritize performance over proper healing.',
+          emotion_type: 'impatience'
+        }
+      ],
+      low_back_pain: [
+        {
+          id: 'patient_chronic_frustration',
+          name: 'Chronic Frustration',
+          type: 'emotional_state',
+          emotional_cost: 2,
+          rarity: 'uncommon',
+          card_text: 'Express frustration with ongoing pain. "Nothing seems to help."',
+          flavor_text: 'Chronic conditions test both body and spirit.',
+          emotion_type: 'frustration',
+          rapport_change: -1
+        }
+      ]
+    }
+
+    return caseCards[caseId] || []
   }
 
   // Mock analytics
