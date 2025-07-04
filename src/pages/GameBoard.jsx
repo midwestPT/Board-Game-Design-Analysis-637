@@ -1,51 +1,68 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import * as FiIcons from 'react-icons/fi';
-import SafeIcon from '../common/SafeIcon';
-import GameCard from '../components/GameCard';
-import PlayerHand from '../components/PlayerHand';
-import GameStats from '../components/GameStats';
-import useGameStore from '../store/gameStore';
+import React, { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import * as FiIcons from 'react-icons/fi'
+import SafeIcon from '../common/SafeIcon'
+import GameCard from '../components/GameCard'
+import PlayerHand from '../components/PlayerHand'
+import GameStats from '../components/GameStats'
+import useGameStore from '../store/gameStore'
 
-const { FiHeart, FiBattery, FiClock, FiTarget, FiUser, FiActivity } = FiIcons;
+const { FiHeart, FiBattery, FiClock, FiTarget, FiUser, FiActivity, FiAward, FiTrendingUp } = FiIcons
 
 function GameBoard() {
-  const { 
-    gameState, 
-    currentPlayer, 
-    playCard, 
-    endTurn, 
-    initializeGame 
-  } = useGameStore();
+  const {
+    gameState,
+    currentPlayer,
+    playCard,
+    endTurn,
+    initializeGame,
+    getPlaySuggestions,
+    getVictoryProgress,
+    getLearningMoments,
+    predictions,
+    victoryStatus
+  } = useGameStore()
 
-  const [selectedCard, setSelectedCard] = useState(null);
-  const [gamePhase, setGamePhase] = useState('investigation'); // setup, investigation, diagnosis, scoring
+  const [selectedCard, setSelectedCard] = useState(null)
+  const [gamePhase, setGamePhase] = useState('investigation')
+  const [showPredictions, setShowPredictions] = useState(false)
+  const [showVictoryProgress, setShowVictoryProgress] = useState(false)
 
   useEffect(() => {
     // Initialize game from localStorage config
-    const config = JSON.parse(localStorage.getItem('gameConfig') || '{}');
-    initializeGame(config);
-  }, [initializeGame]);
+    const config = JSON.parse(localStorage.getItem('gameConfig') || '{}')
+    initializeGame(config)
+  }, [initializeGame])
 
-  const handleCardPlay = (card) => {
+  const handleCardPlay = async (card) => {
     if (selectedCard?.id === card.id) {
-      setSelectedCard(null);
+      setSelectedCard(null)
     } else {
-      setSelectedCard(card);
+      setSelectedCard(card)
     }
-  };
+  }
 
-  const handlePlaySelectedCard = () => {
+  const handlePlaySelectedCard = async () => {
     if (selectedCard) {
-      playCard(selectedCard.id);
-      setSelectedCard(null);
+      const result = await playCard(selectedCard.id)
+      setSelectedCard(null)
+      
+      if (result.success && result.educationalFeedback) {
+        // Show educational feedback
+        showEducationalFeedback(result.educationalFeedback)
+      }
     }
-  };
+  }
+
+  const showEducationalFeedback = (feedback) => {
+    // This would show a modal or notification with educational content
+    console.log('Educational feedback:', feedback)
+  }
 
   const handleEndTurn = () => {
-    endTurn();
-    setSelectedCard(null);
-  };
+    endTurn()
+    setSelectedCard(null)
+  }
 
   if (!gameState) {
     return (
@@ -55,8 +72,12 @@ function GameBoard() {
           <p className="text-gray-600">Loading game...</p>
         </div>
       </div>
-    );
+    )
   }
+
+  const playSuggestions = getPlaySuggestions()
+  const victoryProgress = getVictoryProgress()
+  const learningMoments = getLearningMoments()
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
@@ -79,9 +100,26 @@ function GameBoard() {
                 <div className="text-sm text-gray-600">{gamePhase} Phase</div>
               </div>
             </div>
-
+            
             <div className="flex items-center space-x-4">
               <GameStats />
+              
+              {/* AI Suggestions Button */}
+              <button
+                onClick={() => setShowPredictions(!showPredictions)}
+                className="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors"
+              >
+                <SafeIcon icon={FiTrendingUp} />
+              </button>
+
+              {/* Victory Progress Button */}
+              <button
+                onClick={() => setShowVictoryProgress(!showVictoryProgress)}
+                className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors"
+              >
+                <SafeIcon icon={FiAward} />
+              </button>
+
               <button
                 onClick={handleEndTurn}
                 disabled={currentPlayer !== 'pt_student'}
@@ -91,7 +129,80 @@ function GameBoard() {
               </button>
             </div>
           </div>
+
+          {/* AI Predictions Panel */}
+          <AnimatePresence>
+            {showPredictions && predictions && (
+              <motion.div
+                className="mt-4 p-4 bg-purple-50 rounded-lg border border-purple-200"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+              >
+                <h3 className="text-lg font-semibold text-purple-800 mb-3">AI Suggestions</h3>
+                <div className="space-y-2">
+                  {playSuggestions.slice(0, 3).map((suggestion, index) => (
+                    <div key={index} className="flex justify-between items-center p-2 bg-white rounded border">
+                      <span className="font-medium">{suggestion.card.name}</span>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-purple-600">Value: {suggestion.netBenefit.toFixed(1)}</span>
+                        <span className="text-xs text-gray-500">{suggestion.reasoning}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Victory Progress Panel */}
+          <AnimatePresence>
+            {showVictoryProgress && victoryProgress && (
+              <motion.div
+                className="mt-4 p-4 bg-green-50 rounded-lg border border-green-200"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+              >
+                <h3 className="text-lg font-semibold text-green-800 mb-3">Victory Progress</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {Object.entries(victoryProgress).map(([condition, progress]) => (
+                    <div key={condition} className="bg-white p-3 rounded border">
+                      <h4 className="font-medium text-gray-800 capitalize">
+                        {condition.replace('_', ' ')}
+                      </h4>
+                      <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                        <div
+                          className="bg-green-500 h-2 rounded-full transition-all duration-500"
+                          style={{ width: `${progress.progress_percentage || 0}%` }}
+                        ></div>
+                      </div>
+                      <span className="text-xs text-gray-600">
+                        {progress.progress_percentage || 0}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
+
+        {/* Learning Moments Display */}
+        {learningMoments.length > 0 && (
+          <motion.div
+            className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6"
+            initial={{ opacity: 0, x: -30 }}
+            animate={{ opacity: 1, x: 0 }}
+          >
+            <h3 className="text-lg font-semibold text-yellow-800 mb-2">Learning Moments</h3>
+            {learningMoments.map((moment, index) => (
+              <div key={index} className="text-yellow-700 mb-1">
+                <strong>{moment.type}:</strong> {moment.description}
+              </div>
+            ))}
+          </motion.div>
+        )}
 
         {/* Game Board */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -116,7 +227,7 @@ function GameBoard() {
                 </div>
                 <div className="flex items-center space-x-2">
                   <div className="w-20 h-2 bg-gray-200 rounded-full">
-                    <div 
+                    <div
                       className="h-2 bg-orange-500 rounded-full transition-all"
                       style={{ width: `${(gameState.patientResources.cooperation / 10) * 100}%` }}
                     ></div>
@@ -238,7 +349,7 @@ function GameBoard() {
                 </div>
                 <div className="flex items-center space-x-2">
                   <div className="w-20 h-2 bg-gray-200 rounded-full">
-                    <div 
+                    <div
                       className="h-2 bg-green-500 rounded-full transition-all"
                       style={{ width: `${(gameState.ptResources.rapport / 10) * 100}%` }}
                     ></div>
@@ -266,6 +377,11 @@ function GameBoard() {
                   gameState.discoveredClues.map((clue, index) => (
                     <div key={index} className="text-sm mb-1 last:mb-0 p-2 bg-blue-50 rounded">
                       {clue.description}
+                      {clue.confidence && (
+                        <span className="ml-2 text-xs text-gray-500">
+                          ({Math.round(clue.confidence * 100)}% confidence)
+                        </span>
+                      )}
                     </div>
                   ))
                 )}
@@ -281,7 +397,7 @@ function GameBoard() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.5 }}
         >
-          <PlayerHand 
+          <PlayerHand
             cards={gameState.playerHands[currentPlayer] || []}
             onCardClick={handleCardPlay}
             selectedCard={selectedCard}
@@ -289,7 +405,7 @@ function GameBoard() {
         </motion.div>
       </div>
     </div>
-  );
+  )
 }
 
-export default GameBoard;
+export default GameBoard

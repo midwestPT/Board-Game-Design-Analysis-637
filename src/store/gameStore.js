@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { demoService } from '../services/demoService'
+import { gameEngine } from '../engine/GameEngine'
+import { multiplayerSync } from '../engine/MultiplayerSync'
 
 const useGameStore = create((set, get) => ({
   gameState: null,
@@ -9,6 +11,8 @@ const useGameStore = create((set, get) => ({
   loading: false,
   error: null,
   isDemoMode: !supabase,
+  predictions: null,
+  victoryStatus: null,
 
   initializeGame: async (config) => {
     set({ loading: true, error: null })
@@ -24,10 +28,14 @@ const useGameStore = create((set, get) => ({
         game = await demoService.createGame(config) // Fallback to demo for now
       }
 
+      // Generate initial predictions
+      const predictions = await gameEngine.predictionEngine.generatePredictions(game.game_state)
+
       set({
         gameState: game.game_state,
         gameId: game.id,
         currentPlayer: game.game_state.currentPlayer,
+        predictions: predictions,
         loading: false
       })
 
@@ -38,79 +46,53 @@ const useGameStore = create((set, get) => ({
     }
   },
 
-  loadGame: async (gameId) => {
-    set({ loading: true, error: null })
-    
-    try {
-      // For demo, we'll just reinitialize a game
-      const game = await demoService.createGame({
-        mode: 'ai',
-        difficulty: 'beginner',
-        case: 'ankle_sprain',
-        playerRole: 'pt'
-      })
-
-      set({
-        gameState: game.game_state,
-        gameId: game.id,
-        currentPlayer: game.game_state.currentPlayer,
-        loading: false
-      })
-
-      return game
-    } catch (error) {
-      set({ error: error.message, loading: false })
-      throw error
-    }
-  },
-
-  playCard: async (cardId) => {
+  playCard: async (cardId, targetId = null) => {
     const state = get()
-    const { gameState, currentPlayer } = state
+    const { gameState, currentPlayer, gameId } = state
     
     if (!gameState) return
 
     try {
-      const playerHand = gameState.playerHands[currentPlayer]
-      const card = playerHand.find(c => c.id === cardId)
-      
-      if (!card) return
+      // Use game engine to process card play
+      const result = await gameEngine.processCardPlay(
+        gameState, 
+        cardId, 
+        currentPlayer, 
+        targetId
+      )
 
-      // Create new game state with card effects applied
-      const newGameState = { ...gameState }
-      
-      // Remove card from hand
-      newGameState.playerHands[currentPlayer] = playerHand.filter(c => c.id !== cardId)
-      
-      // Apply card effects
-      if (card.type === 'assessment') {
-        newGameState.discoveredClues.push({
-          id: Date.now(),
-          description: `Discovered: ${card.name} findings`,
-          source: card.name
-        })
-        newGameState.ptResources.energy -= card.energy_cost || 1
+      if (!result.success) {
+        set({ error: result.error })
+        return { success: false, error: result.error, suggestions: result.suggestions }
       }
 
-      if (card.type === 'deflection') {
-        newGameState.patientResources.deflection -= card.deflection_cost || 1
-      }
-
-      if (card.type === 'communication') {
-        newGameState.ptResources.rapport += 1
-      }
-
-      // Add to game log
-      newGameState.gameLog.push({
-        player: currentPlayer,
-        action: `Played ${card.name}`,
-        timestamp: Date.now()
+      // Update local state
+      set({
+        gameState: result.gameState,
+        predictions: result.predictions,
+        victoryStatus: result.victoryUpdate,
+        error: null
       })
 
-      set({ gameState: newGameState })
+      // Sync with multiplayer if applicable
+      if (gameState.isMultiplayer) {
+        await multiplayerSync.synchronizeGameState(
+          gameId,
+          result.gameState,
+          currentPlayer,
+          { type: 'play_card', cardId, targetId }
+        )
+      }
+
+      return {
+        success: true,
+        interactions: result.interactions,
+        educationalFeedback: result.educationalFeedback
+      }
     } catch (error) {
       console.error('Error playing card:', error)
       set({ error: error.message })
+      return { success: false, error: error.message }
     }
   },
 
@@ -133,24 +115,141 @@ const useGameStore = create((set, get) => ({
         newGameState.ptResources.energy = Math.min(12, newGameState.ptResources.energy + 2)
       }
 
+      // Clear cards played this turn
+      newGameState.cardsPlayedThisTurn = []
+
       // Draw card if hand size below 5
       const currentHand = newGameState.playerHands[nextPlayer]
       if (currentHand.length < 5) {
-        const newCard = demoService.generateStartingHand(nextPlayer)[0] // Get a random card
+        const newCard = demoService.generateStartingHand(nextPlayer)[0]
         if (newCard) {
-          newCard.id = `${newCard.id}_${Date.now()}` // Make unique
+          newCard.id = `${newCard.id}_${Date.now()}`
           newGameState.playerHands[nextPlayer].push(newCard)
         }
       }
 
       newGameState.currentPlayer = nextPlayer
 
+      // Generate new predictions
+      const predictions = await gameEngine.predictionEngine.generatePredictions(newGameState)
+
+      // Update victory conditions
+      const victoryUpdate = await gameEngine.victorySystem.updateVictoryConditions(newGameState, {})
+
       set({
         gameState: newGameState,
-        currentPlayer: nextPlayer
+        currentPlayer: nextPlayer,
+        predictions: predictions,
+        victoryStatus: victoryUpdate
       })
+
+      // Check for game end
+      if (victoryUpdate.game_end_triggered) {
+        await get().endGame(victoryUpdate.game_end_triggered)
+      }
+
     } catch (error) {
       console.error('Error ending turn:', error)
+      set({ error: error.message })
+    }
+  },
+
+  // New method for handling counter cards during opponent's turn
+  playCounterCard: async (cardId, targetActionId) => {
+    const state = get()
+    const { gameState, currentPlayer } = state
+
+    if (!gameState) return
+
+    try {
+      // Validate counter timing
+      const validation = await gameEngine.validators.validateCounterPlay(
+        gameState, 
+        cardId, 
+        currentPlayer, 
+        targetActionId
+      )
+
+      if (!validation.isValid) {
+        return { success: false, error: validation.error }
+      }
+
+      // Process counter card
+      const result = await gameEngine.processCardPlay(
+        gameState, 
+        cardId, 
+        currentPlayer, 
+        targetActionId
+      )
+
+      if (result.success) {
+        set({
+          gameState: result.gameState,
+          predictions: result.predictions,
+          victoryStatus: result.victoryUpdate
+        })
+      }
+
+      return result
+    } catch (error) {
+      console.error('Error playing counter card:', error)
+      return { success: false, error: error.message }
+    }
+  },
+
+  // Get optimal play suggestions
+  getPlaySuggestions: () => {
+    const state = get()
+    return state.predictions?.optimalPlays || []
+  },
+
+  // Get current victory progress
+  getVictoryProgress: () => {
+    const state = get()
+    return state.victoryStatus?.victory_progress || {}
+  },
+
+  // Get learning moments
+  getLearningMoments: () => {
+    const state = get()
+    return state.victoryStatus?.learning_moments || []
+  },
+
+  endGame: async (endCondition) => {
+    const state = get()
+    const { gameState, gameId } = state
+
+    try {
+      // Calculate final scores
+      const finalScores = await gameEngine.victorySystem.calculateFinalScores(gameState)
+      
+      // Generate educational summary
+      const educationalSummary = await gameEngine.generateEducationalSummary(gameState)
+
+      // Save game performance
+      if (gameId) {
+        await get().saveGamePerformance({
+          userId: gameState.players[0].id, // Assuming single player for demo
+          gameId: gameId,
+          ...finalScores,
+          endCondition: endCondition,
+          educationalSummary: educationalSummary
+        })
+      }
+
+      set({
+        gameState: { ...gameState, status: 'completed', endCondition, finalScores },
+        predictions: null,
+        victoryStatus: { ...state.victoryStatus, game_completed: true, finalScores }
+      })
+
+      return {
+        finalScores,
+        educationalSummary,
+        endCondition
+      }
+    } catch (error) {
+      console.error('Error ending game:', error)
       set({ error: error.message })
     }
   },
@@ -163,7 +262,6 @@ const useGameStore = create((set, get) => ({
 
     try {
       if (!supabase) {
-        // Demo mode
         await demoService.saveGamePerformance(gameId, performanceData.userId, performanceData)
       } else {
         // Real Supabase save would go here
@@ -171,6 +269,46 @@ const useGameStore = create((set, get) => ({
       }
     } catch (error) {
       console.error('Error saving game performance:', error)
+    }
+  },
+
+  // Multiplayer specific methods
+  joinMultiplayerGame: async (roomId) => {
+    try {
+      // Initialize multiplayer connection
+      const websocket = new WebSocket(`ws://localhost:3001/game/${roomId}`)
+      
+      await new Promise((resolve, reject) => {
+        websocket.onopen = () => {
+          multiplayerSync.initializeConnection(roomId, 'current_player_id', websocket)
+          resolve()
+        }
+        websocket.onerror = reject
+      })
+
+      set({ isMultiplayer: true, roomId: roomId })
+    } catch (error) {
+      console.error('Error joining multiplayer game:', error)
+      set({ error: 'Failed to join multiplayer game' })
+    }
+  },
+
+  handleMultiplayerUpdate: (update) => {
+    const state = get()
+    
+    // Handle different types of multiplayer updates
+    switch (update.type) {
+      case 'game_state_sync':
+        set({ gameState: update.gameState })
+        break
+      case 'player_disconnected':
+        // Handle player disconnection
+        console.log('Player disconnected:', update.playerId)
+        break
+      case 'conflict_resolution':
+        // Handle conflict resolution
+        console.log('Conflict resolved:', update.resolution)
+        break
     }
   }
 }))
